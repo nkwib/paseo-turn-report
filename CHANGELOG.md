@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 (2026-10-19)
+
+- Add reproducible HD listing images composed from real screenshots.
+- Clarify the description and direct Git install command.
+
 ## 0.1.1 (2026-10-19)
 
 ### Fixed

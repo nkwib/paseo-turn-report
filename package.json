@@ -1,9 +1,9 @@
 {
   "name": "paseo-turn-report",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
-  "description": "One card per agent turn in Paseo: the project check, the agent's claims against the commands it ran, merge conflicts with other agents, and changed documents.",
+  "description": "Run your project check after each turn, compare claims with command evidence and review results and worktree conflicts in one board.",
   "license": "MIT",
   "author": "Gabriele Magno <gabrigmm@gmail.com>",
   "repository": {

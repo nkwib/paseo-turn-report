@@ -1,0 +1,50 @@
+{
+  "name": "Turn report",
+  "background": "#eef2f7",
+  "accent": "#2d517d",
+  "ink": "#172b43",
+  "muted": "#54677d",
+  "pages": [
+    {
+      "output": "cover-hd.png",
+      "source": "screenshot-phone.png",
+      "crop": [
+        32,
+        328,
+        749,
+        1274
+      ],
+      "title": "“Tests pass.”\nSee what the\ncheck says.",
+      "body": "Run your project check after a turn.\nCompare claims with command evidence.\nSpot conflicts with other worktrees.",
+      "detail": "One report per turn\nA board across agents",
+      "caption": "Real report: the agent’s unit tests passed; the broader project check failed."
+    },
+    {
+      "output": "board-hd.png",
+      "source": "screenshot-board.png",
+      "crop": [
+        320,
+        0,
+        1440,
+        542
+      ],
+      "title": "Several agents.\nOne board.",
+      "body": "See each agent’s latest report.\nOpen the turns that need attention.\nBrowse earlier turns with History.",
+      "caption": "Latest reports from four agents. Colours reflect the check, proof and conflicts."
+    },
+    {
+      "output": "approval-hd.png",
+      "source": "screenshot-approval.png",
+      "crop": [
+        462,
+        250,
+        1299,
+        650
+      ],
+      "title": "Choose the\ncheck that runs.",
+      "body": "A command from paseo.json waits\nfor your approval. If its text changes,\nthe plugin asks again.",
+      "detail": "Or set Check command in Settings",
+      "caption": "Approval pins the command text. The check runs project code as the daemon’s user."
+    }
+  ]
+}

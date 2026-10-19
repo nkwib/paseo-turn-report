@@ -1,4 +1,4 @@
-Turn report adds one card to an agent's timeline when its turn ends. The card answers three questions without reading the whole transcript: does the project check pass, do the agent's claims match what it actually ran, and will this agent's changes conflict with another agent working in the same repository. It also lists the documents the turn changed. A board in the sidebar shows the latest report for every agent on the host, so you can see which agents need attention.
+Turn report shows which agent turns need attention. After a turn, it runs the project check you set or approved, compares the agent's claims with its recorded commands and flags merge conflicts with other live agents' worktrees. The timeline card also lists changed documents. A board shows the latest report for every agent on the host.
 
 It is meant for running several coding agents at once, each in its own Git worktree. Everything runs on the machine with your Paseo daemon, and the plugin itself makes no network requests.
 

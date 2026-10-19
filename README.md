@@ -1,13 +1,21 @@
 # Turn report for Paseo
 
-A [Paseo](https://github.com/getpaseo/paseo) plugin that adds one card to an agent's timeline when its turn ends. The card runs the project check, compares what the agent claims ("tests pass", "verified", "fixed") with the commands it actually ran, lists files that would conflict with other live agents' worktrees, and lists the documents the turn changed. A board in the sidebar shows the latest report for every agent on the host. [OVERVIEW.md](OVERVIEW.md) describes what users see, what the plugin reads and writes, and its limits.
+![A real Turn report showing that the agent's tests passed while the broader project check failed](assets/listing/cover-hd.png)
+
+See which agent turns need attention in [Paseo](https://github.com/getpaseo/paseo).
+
+- Run the project check you set or approved after each turn.
+- Compare claims such as "tests pass" with the commands the agent ran.
+- Flag merge conflicts with other live agents' worktrees and review results in one board.
+
+Each report also lists the documents changed during the turn. [OVERVIEW.md](OVERVIEW.md) explains the verdicts, configuration and limits. Command evidence supports review; it does not establish that a change is correct.
 
 ## Install
 
 Requires Paseo 0.11.2 or later with plugins enabled. Conflict detection needs Git 2.38 or later on the daemon host. The project check needs a macOS or Linux daemon.
 
 ```sh
-paseo plugin install git:nkwib/paseo-turn-report
+paseo plugin add https://github.com/nkwib/paseo-turn-report.git
 ```
 
 Plugins run unsandboxed on the daemon host. Read the code before you install it.
@@ -27,6 +35,8 @@ The plugin uses `scripts.verify`, then `scripts.check`, then `scripts.test`. A c
 Approval pins the command text, not what it runs. The check runs project code, including code the agent just wrote, as the daemon's user and outside any agent sandbox.
 
 ## Development
+
+Listing images are 1920 × 1080 PNGs composed from the original screenshots. To rebuild them, install Pillow 12 or later and run `python3 scripts/compose-listing.py`. Layout and copy live in [assets/listing/layout.json](assets/listing/layout.json). Screenshots are cropped and scaled down only. Set `LISTING_FONT` and `LISTING_FONT_BOLD` to use other installed TrueType fonts.
 
 ```sh
 npm ci

@@ -1,12 +1,11 @@
 {
   "id": "turn-report",
   "name": "Turn report",
-  "description": "After each agent turn, adds a card that runs the project check you set or approved, compares the agent's claims with the commands it ran, flags merge conflicts with other live agents and lists the documents it changed.",
+  "description": "Run your project check after each turn, compare claims with command evidence and review results and worktree conflicts in one board.",
   "media": [
-    "assets/screenshot-turn-card.png",
-    "assets/screenshot-board.png",
-    "assets/screenshot-approval.png",
-    "assets/screenshot-phone.png"
+    "assets/listing/cover-hd.png",
+    "assets/listing/board-hd.png",
+    "assets/listing/approval-hd.png"
   ],
   "requirements": {
     "paseo": ">=0.11.2"
