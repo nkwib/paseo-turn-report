@@ -130,10 +130,6 @@ export function docViewerEnabled(config: Pick<MutableDaemonConfig, "pluginsEnabl
 
 export type DocViewerState = "unknown" | "on" | "off";
 
-/**
- * The viewer's own card owns a turn's documents, so the card and the board show none while it is on, and none while
- * that is still unknown, so a count never flashes and disappears.
- */
 export const showsDocuments = (docViewer: DocViewerState) => docViewer === "off";
 
 /**

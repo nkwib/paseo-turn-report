@@ -6,7 +6,6 @@ import { isolatedStatus, repoInfo } from "./git";
 
 const log = (message: string) => console.log(`[turn-report] ${new Date().toISOString()} ${message}`);
 
-// Every extension the PDF and Office viewer opens (its shared/kinds.ts), plus SVG and notebooks, which it does not.
 const KIND_EXTENSIONS: Readonly<Record<string, readonly string[]>> = {
   pdf: ["pdf"],
   docx: ["docx"],
