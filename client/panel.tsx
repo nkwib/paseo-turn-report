@@ -8,7 +8,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import type { TurnReport } from "../shared/report";
 import { BOARD_LIMIT, recentReportsRpc, settingsDefinition } from "../shared/report";
 import { useDocViewer, useReportActions } from "./card";
-import { boardSummary, footerSummary, latestPerAgent, overallTone, timeAgo } from "./format";
+import { boardSummary, footerSummary, latestPerAgent, overallTone, showsDocuments, timeAgo } from "./format";
 import { ReportBody, ReportChips, toneColor } from "./report-view";
 
 const POLL_MS = 4_000;
@@ -51,7 +51,8 @@ function Board({ client, scope, theme, host, compact, navigation, onScopeChange 
   const [open, setOpen] = useState<string | null>(null);
   const [history, setHistory] = useState(false);
   const ready = settings.status === "ready" ? settings.values : null;
-  const base = useReportActions(client, host.id, ready, useDocViewer(client, ready?.openWithPluginId ?? null));
+  const documents = showsDocuments(useDocViewer(client, ready?.openWithPluginId ?? null));
+  const base = useReportActions(client);
   const actions = { ...base, openAgent: navigation ? (agentId: string) => navigation.openAgent({ agentId, serverId: host.id }) : undefined };
   const list = history ? (reports ?? []) : latestPerAgent(reports ?? []);
   const summary = boardSummary(reports ?? []);
@@ -113,8 +114,8 @@ function Board({ client, scope, theme, host, compact, navigation, onScopeChange 
               </Text>
               <Icon name={expanded ? "ChevronDown" : "ChevronRight"} size={14} color={colors.foregroundMuted} />
             </Pressable>
-            <ReportChips report={report} colors={colors} />
-            {expanded ? <ReportBody report={report} colors={colors} actions={actions} compact={compact} showDocuments /> : null}
+            <ReportChips report={report} colors={colors} showDocuments={documents} />
+            {expanded ? <ReportBody report={report} colors={colors} actions={actions} compact={compact} showDocuments={documents} /> : null}
           </View>
         );
       })}

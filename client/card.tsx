@@ -3,16 +3,14 @@ import { useSettings } from "@getpaseo/plugin/client";
 import { useToast } from "@getpaseo/plugin/client/react-native";
 import { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import type { Artifact, TurnReport, TurnReportSettings } from "../shared/report";
+import type { TurnReport } from "../shared/report";
 import { approveCheckRpc, rerunRpc, settingsDefinition } from "../shared/report";
-import { docViewerEnabled, docViewerFor, timeAgo, type DocViewerState } from "./format";
-import { openPluginScreen } from "./open";
+import { docViewerEnabled, showsDocuments, timeAgo, type DocViewerState } from "./format";
 import { ReportBody, ReportChips, type ReportActions } from "./report-view";
 
 /** Actions shared by the timeline card and the panel. Built from the closed-over client context. */
-export function useReportActions(client: PluginClientContext, serverId: string, settings: Pick<TurnReportSettings, "openWithPluginId"> | null, docViewer: DocViewerState): ReportActions {
+export function useReportActions(client: PluginClientContext): ReportActions {
   const toast = useToast();
-  const viewer = docViewerFor(settings, serverId, docViewer);
   return {
     rerun: (report: TurnReport) => {
       client.rpc(rerunRpc, { reportId: report.id }).then(
@@ -27,14 +25,6 @@ export function useReportActions(client: PluginClientContext, serverId: string, 
         (error: unknown) => toast.error(String(error)),
       );
     },
-    openArtifact: viewer
-      ? (report: TurnReport, artifact: Artifact) => {
-          if (!report.workspaceId) return toast.error("No workspace for this agent");
-          openPluginScreen(serverId, viewer, "document", { workspaceId: report.workspaceId, path: artifact.path }).catch((error: unknown) =>
-            toast.error(`Could not open: ${String(error)}`),
-          );
-        }
-      : undefined,
   };
 }
 
@@ -73,14 +63,14 @@ export function useDocViewer(client: PluginClientContext, pluginId: string | nul
 }
 
 export function createTurnReportCard(client: PluginClientContext) {
-  return function TurnReportCard({ item, theme, host, layout }: PluginTimelineItemProps<TurnReport>) {
+  return function TurnReportCard({ item, theme, layout }: PluginTimelineItemProps<TurnReport>) {
     const report = item.data;
     const colors = theme.colors;
     // Timeline renderers get the plugin context, so useSettings works here as in screens.
     const settings = useSettings(settingsDefinition);
     const ready = settings.status === "ready" ? settings.values : null;
-    const docViewer = useDocViewer(client, ready?.openWithPluginId ?? null);
-    const actions = useReportActions(client, host.id, ready, docViewer);
+    const documents = showsDocuments(useDocViewer(client, ready?.openWithPluginId ?? null));
+    const actions = useReportActions(client);
     return (
       <View style={[styles.card, { borderColor: colors.border, backgroundColor: colors.surface1 }]} accessibilityLabel="Turn report">
         <View style={styles.header}>
@@ -90,8 +80,8 @@ export function createTurnReportCard(client: PluginClientContext) {
             {timeAgo(report.endedAt)}
           </Text>
         </View>
-        <ReportChips report={report} colors={colors} />
-        <ReportBody report={report} colors={colors} actions={actions} compact={layout.compact} showDocuments={docViewer === "off"} />
+        <ReportChips report={report} colors={colors} showDocuments={documents} />
+        <ReportBody report={report} colors={colors} actions={actions} compact={layout.compact} showDocuments={documents} />
       </View>
     );
   };

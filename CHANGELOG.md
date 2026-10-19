@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Changed
+
+- While the PDF and Office viewer is enabled, the card and the board show no documents chip or list: the viewer's card owns them. Both stay hidden until the plugin knows whether the viewer is enabled, so no count flashes. Without the viewer, the list is unchanged.
+- Open is gone from the board. It sent paths relative to the repository root to a viewer that resolves them against the workspace directory, so a workspace inside a repository opened "File not found". The "Open documents with plugin" setting is now "Document viewer plugin".
+
 ### Fixed
 
 - The documents chip is muted. Amber is for something to look at, and a changed document is not.

@@ -2,7 +2,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { copyText, Icon, useToast } from "@getpaseo/plugin/client/react-native";
 import { useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import type { Artifact, TurnReport } from "../shared/report";
+import type { TurnReport } from "../shared/report";
 import { escapeHidden } from "../shared/report";
 import { ProofSection } from "./proof-view";
 import {
@@ -12,7 +12,6 @@ import {
   proofLabel,
   proofTone,
   artifactLabel,
-  canOpenInDocViewer,
   checkRan,
   collisionLabel,
   formatDuration,
@@ -28,7 +27,6 @@ export interface ReportActions {
   rerun?: (report: TurnReport) => void;
   /** Settles when the approval request does; the button stays disabled until then. */
   approveCheck?: (report: TurnReport) => Promise<void>;
-  openArtifact?: (report: TurnReport, artifact: Artifact) => void;
   openAgent?: (agentId: string) => void;
 }
 
@@ -82,7 +80,7 @@ function SmallButton({ colors, icon, label, onPress, disabled = false }: { color
 }
 
 /** One-line glance: check, collisions, documents. */
-export function ReportChips({ report, colors }: { report: TurnReport; colors: Colors }) {
+export function ReportChips({ report, colors, showDocuments }: { report: TurnReport; colors: Colors; showDocuments: boolean }) {
   const collisionTone: Tone = report.collisions.items.length > 0 ? "danger" : report.collisions.state === "done" ? "success" : "muted";
   const proofChip = report.proof ? proofTone(report.proof) : "muted";
   return (
@@ -90,7 +88,7 @@ export function ReportChips({ report, colors }: { report: TurnReport; colors: Co
       {report.proof && (proofChip === "danger" || proofChip === "warning") ? <Chip colors={colors} icon={PROOF_ICONS[proofChip]} label={proofLabel(report.proof)} tone={proofChip} /> : null}
       <Chip colors={colors} icon={verifyIcon(report)} label={verifyLabel(report)} tone={verifyTone(report.verify.state)} />
       <Chip colors={colors} icon="GitMerge" label={collisionLabel(report)} tone={collisionTone} />
-      <Chip colors={colors} icon="Files" label={artifactLabel(report)} tone="muted" />
+      {showDocuments ? <Chip colors={colors} icon="Files" label={artifactLabel(report)} tone="muted" /> : null}
     </View>
   );
 }
@@ -200,9 +198,6 @@ export function ReportBody({ report, colors, actions, compact, showDocuments }: 
               {artifact.status} · {formatSize(artifact.size)}
             </Text>
           </View>
-          {actions.openArtifact && canOpenInDocViewer(artifact.path) ? (
-            <SmallButton colors={colors} icon="ExternalLink" label="Open" onPress={() => actions.openArtifact?.(report, artifact)} />
-          ) : null}
           <Pressable accessibilityRole="button" accessibilityLabel={`Copy path ${artifact.path}`} hitSlop={8} onPress={() => copy(joinPath(report.cwd, artifact.path), "path")} style={styles.iconButton}>
             <Icon name="Copy" size={14} color={colors.foregroundMuted} />
           </Pressable>

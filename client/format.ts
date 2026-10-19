@@ -1,5 +1,5 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
-import type { ClaimVerdict, Outcome, ProofReport, TurnReport, TurnReportSettings, Verdict, VerifyReport, VerifyState } from "../shared/report";
+import type { ClaimVerdict, Outcome, ProofReport, TurnReport, Verdict, VerifyReport, VerifyState } from "../shared/report";
 import { CHECK_ALREADY_RUNNING, escapeHidden, hasHiddenCharacters, NOT_A_GIT_REPOSITORY } from "../shared/report";
 import { commandResult } from "../shared/command-kind";
 
@@ -127,19 +127,11 @@ export function docViewerEnabled(config: Pick<MutableDaemonConfig, "pluginsEnabl
 
 export type DocViewerState = "unknown" | "on" | "off";
 
-/** The plugin the Open button goes to: only one the daemon has enabled, so Open never lands on a disabled plugin. */
-export function docViewerFor(settings: Pick<TurnReportSettings, "openWithPluginId"> | null, serverId: string, docViewer: DocViewerState): string | null {
-  return settings?.openWithPluginId && serverId && docViewer === "on" ? settings.openWithPluginId : null;
-}
-
-// Extensions the doc viewer (nkwib/doc-viewer 0.5) opens. By extension, not kind: "image" also covers SVG, which it does not render.
-const DOC_VIEWER_EXTENSIONS = new Set(["pdf", "docx", "xlsx", "csv", "pptx", "png", "jpg", "jpeg", "gif", "webp", "jsonl"]);
-
-export function canOpenInDocViewer(path: string): boolean {
-  const name = path.slice(path.lastIndexOf("/") + 1);
-  const dot = name.lastIndexOf(".");
-  return dot > 0 && DOC_VIEWER_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
-}
+/**
+ * The viewer's own card owns a turn's documents, so the card and the board show none while it is on, and none while
+ * that is still unknown, so a count never flashes and disappears.
+ */
+export const showsDocuments = (docViewer: DocViewerState) => docViewer === "off";
 
 /**
  * One status per report for the board, the worst of check, collisions and proof: red = check failed or a claim

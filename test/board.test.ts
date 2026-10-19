@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approvalPrompt, boardSummary, checkProvenance, claimLine, footerSummary, canOpenInDocViewer, checkRan, collisionLabel, docViewerEnabled, docViewerFor, latestPerAgent, overallTone, proofFacts, verifyLabel } from "../client/format";
+import { approvalPrompt, boardSummary, checkProvenance, claimLine, footerSummary, checkRan, collisionLabel, docViewerEnabled, latestPerAgent, overallTone, proofFacts, showsDocuments, verifyLabel } from "../client/format";
 import { CHECK_ALREADY_RUNNING, NOT_A_GIT_REPOSITORY, type TurnReport, type Verdict } from "../shared/report";
 
 function report(id: string, agentId: string, patch: { verify?: Partial<TurnReport["verify"]>; collisions?: Partial<TurnReport["collisions"]>; verdicts?: Verdict[] } = {}): TurnReport {
@@ -31,19 +31,10 @@ describe("documents next to the doc viewer", () => {
     expect(docViewerEnabled({ pluginsEnabled: true, plugins: { [id]: viewer } }, "")).toBe(false);
   });
 
-  it("offers Open only when the doc viewer is on, never into a disabled or unknown plugin", () => {
-    const settings = { openWithPluginId: "paseo-doc-viewer" };
-    expect(docViewerFor(settings, "srv", "on")).toBe("paseo-doc-viewer");
-    expect(docViewerFor(settings, "srv", "off")).toBeNull();
-    expect(docViewerFor(settings, "srv", "unknown")).toBeNull();
-    expect(docViewerFor({ openWithPluginId: "" }, "srv", "on")).toBeNull();
-    expect(docViewerFor(settings, "", "on")).toBeNull();
-    expect(docViewerFor(null, "srv", "on")).toBeNull();
-  });
-
-  it("offers Open only for file types the doc viewer renders", () => {
-    for (const path of ["out/report.pdf", "a.docx", "b.xlsx", "c.csv", "d.pptx", "e.png", "f.JPG", "g.jpeg", "h.gif", "i.webp", "log.jsonl"]) expect(canOpenInDocViewer(path)).toBe(true);
-    for (const path of ["out/chart.svg", "nb.ipynb", "README", "dir.pdf/notes.txt"]) expect(canOpenInDocViewer(path)).toBe(false);
+  it("shows documents only once the doc viewer is known to be off", () => {
+    expect(showsDocuments("off")).toBe(true);
+    expect(showsDocuments("on")).toBe(false);
+    expect(showsDocuments("unknown")).toBe(false);
   });
 });
 

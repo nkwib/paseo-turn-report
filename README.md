@@ -8,7 +8,7 @@ See which agent turns need attention in [Paseo](https://github.com/getpaseo/pase
 - Compare claims such as "tests pass" with the commands the agent ran.
 - Flag merge conflicts with other live agents' worktrees and review results in one board.
 
-Each report also lists the documents changed during the turn. [OVERVIEW.md](OVERVIEW.md) explains the verdicts, configuration and limits. Command evidence supports review; it does not establish that a change is correct.
+Without the PDF and Office viewer plugin, each report also lists the documents changed during the turn. [OVERVIEW.md](OVERVIEW.md) explains the verdicts, configuration and limits. Command evidence supports review; it does not establish that a change is correct.
 
 ## Install
 
