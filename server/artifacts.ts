@@ -6,21 +6,24 @@ import { isolatedStatus, repoInfo } from "./git";
 
 const log = (message: string) => console.log(`[turn-report] ${new Date().toISOString()} ${message}`);
 
-export const ARTIFACT_KINDS: Readonly<Record<string, string>> = {
-  pdf: "pdf",
-  docx: "docx",
-  xlsx: "xlsx",
-  csv: "csv",
-  pptx: "pptx",
-  png: "image",
-  jpg: "image",
-  jpeg: "image",
-  gif: "image",
-  webp: "image",
-  svg: "image",
-  jsonl: "jsonl",
-  ipynb: "ipynb",
+// Every extension the PDF and Office viewer opens (its shared/kinds.ts), plus SVG and notebooks, which it does not.
+const KIND_EXTENSIONS: Readonly<Record<string, readonly string[]>> = {
+  pdf: ["pdf"],
+  docx: ["docx"],
+  xlsx: ["xlsx"],
+  csv: ["csv", "tsv"],
+  jsonl: ["jsonl", "ndjson"],
+  parquet: ["parquet"],
+  pptx: ["pptx"],
+  video: ["mp4", "m4v", "mov", "webm"],
+  audio: ["mp3", "m4a", "wav", "flac"],
+  image: ["png", "jpg", "jpeg", "gif", "tif", "tiff", "heic", "heif", "webp", "svg"],
+  ipynb: ["ipynb"],
 };
+
+export const ARTIFACT_KINDS: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(KIND_EXTENSIONS).flatMap(([kind, extensions]) => extensions.map((extension) => [extension, kind])),
+);
 
 const SKIP_DIRS = new Set([".git", "node_modules", ".venv", "venv", "__pycache__", ".next", ".turbo", ".cache", "target", ".gradle", ".idea"]);
 const MAX_ENTRIES = 20_000;

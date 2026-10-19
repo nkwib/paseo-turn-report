@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- The documents list misses no type the PDF and Office viewer opens: TSV, NDJSON, Parquet, video, audio, TIFF and HEIC are added. A test pins the list against the viewer's.
 - The documents chip is muted. Amber is for something to look at, and a changed document is not.
 
 ## 0.1.2 (2026-10-19)

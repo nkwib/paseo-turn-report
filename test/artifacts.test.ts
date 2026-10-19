@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { artifactKind, collectArtifacts, selectArtifacts, type FileStat } from "../server/artifacts";
+import { ARTIFACT_KINDS, artifactKind, collectArtifacts, selectArtifacts, type FileStat } from "../server/artifacts";
 
 const T0 = 1_760_000_000_000;
 const file = (path: string, mtimeOffset: number, birthOffset = -86_400_000, size = 10): FileStat => ({ path, mtimeMs: T0 + mtimeOffset, birthtimeMs: T0 + birthOffset, size });
@@ -44,6 +44,12 @@ describe("selectArtifacts", () => {
     expect(artifactKind("nb.ipynb")).toBe("ipynb");
     expect(artifactKind("pic.JPEG")).toBe("image");
     expect(artifactKind("main.rs")).toBeNull();
+  });
+
+  it("lists what the doc viewer opens (0.5.2 shared/kinds.ts), plus SVG and notebooks", () => {
+    const docViewer = ["pdf", "docx", "xlsx", "csv", "tsv", "jsonl", "ndjson", "parquet", "pptx", "mp4", "m4v", "mov", "webm", "mp3", "m4a", "wav", "flac", "png", "jpg", "jpeg", "gif", "tif", "tiff", "heic", "heif", "webp"];
+    expect(Object.keys(ARTIFACT_KINDS).sort()).toEqual([...docViewer, "svg", "ipynb"].sort());
+    expect([artifactKind("runs.tsv"), artifactKind("log.ndjson"), artifactKind("t.parquet"), artifactKind("demo.MOV"), artifactKind("a.flac"), artifactKind("p.HEIC")]).toEqual(["csv", "jsonl", "parquet", "video", "audio", "image"]);
   });
 });
 
