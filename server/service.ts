@@ -5,7 +5,7 @@ import { CHECK_ALREADY_RUNNING, hasHiddenCharacters, MAX_REPORTS, REPORT_KIND, R
 import { createCheckApprovals, type CheckApprovals } from "./approvals";
 import type { AgentTimelineItem, PaseoApi } from "./host-types";
 import { changedFiles, collectArtifacts, type TurnWindow } from "./artifacts";
-import { buildProof, evidenceFromProof, extractEvidence, sliceTurn, toRepoPath, type PluginCheck, type TurnEvidence } from "./proof";
+import { buildProof, evidenceFromProof, extractEvidence, sliceTurn, toRepoPath, unreportedCwdAfter, type PluginCheck, type RunContext, type TurnEvidence } from "./proof";
 import { detectCollisions, type PeerAgent } from "./collisions";
 import { repoInfo } from "./git";
 import { IDLE, stepRetry, type RetryEvent, type RetryState } from "./retry";
@@ -22,7 +22,7 @@ export interface TurnEnded {
 }
 
 type ReportOrigin =
-  | { kind: "turn" | "plugin_followup"; event: TurnEnded; reportId: string; startedAtMs: number | null; evidence: TurnEvidence | null }
+  | { kind: "turn" | "plugin_followup"; event: TurnEnded; reportId: string; startedAtMs: number | null; turn: AgentTimelineItem[] | null }
   | { kind: "rerun"; report: TurnReport };
 
 type ReportSubject = Pick<TurnReport, "id" | "agentId" | "agentTitle" | "workspaceId" | "turnId" | "cwd"> & { provider: string; startedAtMs: number | null };
@@ -42,20 +42,23 @@ function pluginCheckOf(verify: VerifyReport): PluginCheck | null {
 }
 
 /** A timeline the plugin cannot read costs the card its proof, never the card. */
-function evidenceOfTurn(timeline: readonly AgentTimelineItem[], previousEnd: number | null): TurnEvidence | null {
+function evidenceOfTurn(turn: readonly AgentTimelineItem[], context: RunContext): TurnEvidence | null {
   try {
-    return extractEvidence(sliceTurn(timeline, previousEnd));
+    return extractEvidence(turn, context);
   } catch (error) {
     log(`proof skipped: ${String(error).slice(0, 200)}`);
     return null;
   }
 }
 
+/** Commands count for this workspace only when they ran in its repository (or in the agent's cwd outside git). */
 async function evidenceOf(origin: ReportOrigin, root: string | null, cwd: string, window: TurnWindow | null): Promise<TurnEvidence | null> {
-  if (origin.kind === "rerun") return origin.report.proof ? evidenceFromProof(origin.report.proof) : null;
-  const { evidence } = origin;
-  if (!evidence || !root) return evidence;
   const realCwd = await realpath(cwd).catch(() => cwd);
+  const prior = origin.kind === "rerun" || !origin.turn ? [] : origin.event.timeline?.slice(0, origin.event.timeline.length - origin.turn.length) ?? [];
+  const context = { root: root ?? realCwd, cwd, realCwd, cwdUnconfirmed: unreportedCwdAfter(prior) };
+  if (origin.kind === "rerun") return origin.report.proof ? evidenceFromProof(origin.report.proof) : null;
+  const evidence = origin.turn ? evidenceOfTurn(origin.turn, context) : null;
+  if (!evidence || !root) return evidence;
   const fromGit = window ? await changedFiles(root, window) : [];
   return { ...evidence, files: [...new Set([...fromGit, ...evidence.files.map((path) => toRepoPath(path, { root, cwd, realCwd }))])] };
 }
@@ -290,9 +293,9 @@ export function createReportService(
       // Turn ids are numbered per agent session ("foreground-turn-1", "codex-turn-0"), so they repeat across agents
       // and after a daemon restart; the agent id and start time keep each turn's report and chat row apart.
       const reportId = `turn-report:${event.agent.id}:${event.turnId ?? start?.turnId ?? "turn"}:${startedAtMs ?? Date.now()}`;
-      const evidence = event.timeline ? evidenceOfTurn(event.timeline, previousEnd) : null;
+      const turn = event.timeline ? sliceTurn(event.timeline, previousEnd) : null;
       const kind = retry.get(event.agent.id)?.kind === "in_followup" ? "plugin_followup" : "turn";
-      track(buildReport({ kind, event, reportId, startedAtMs, evidence }, paseo).catch((error) => log(`report failed: ${String(error)}`)));
+      track(buildReport({ kind, event, reportId, startedAtMs, turn }, paseo).catch((error) => log(`report failed: ${String(error)}`)));
     },
     recent(workspaceId, limit) {
       const out: TurnReport[] = [];

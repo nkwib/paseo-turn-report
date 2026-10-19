@@ -2,7 +2,9 @@ import { lstat, readdir } from "node:fs/promises";
 import { extname, join, relative, sep } from "node:path";
 import type { Artifact, ArtifactsReport } from "../shared/report";
 import { MAX_ARTIFACTS } from "../shared/report";
-import { git } from "./git";
+import { isolatedStatus, repoInfo } from "./git";
+
+const log = (message: string) => console.log(`[turn-report] ${new Date().toISOString()} ${message}`);
 
 export const ARTIFACT_KINDS: Readonly<Record<string, string>> = {
   pdf: "pdf",
@@ -98,15 +100,39 @@ export async function scanFiles(root: string, sinceMs: number): Promise<{ files:
   return { files, truncated };
 }
 
-/** On the real repository, like Paseo's Changes view: a clean filter its config names can run (OVERVIEW, Limits). */
+/**
+ * The files git reports changed in the worktree, kept to those modified inside the turn window. Read through an isolated
+ * git directory (git.ts, isolatedStatus) so no clean or process filter, fsmonitor hook or merge driver the repository's,
+ * global or system config names runs during this passive scan. The real index and objects are never written.
+ *
+ * Tracked changes come from `git diff HEAD` (content comparison, so a change that the repository's line-ending settings
+ * normalize away, such as a CRLF-only touch, is not reported); untracked files from `git ls-files --others`, which
+ * respects .gitignore, info/exclude and core.excludesFile. Plain `git status` would report a stat-dirty line-ending-only
+ * change as modified; the diff does not. `--ignore-submodules=dirty` keeps the daemon from entering a submodule's own
+ * working tree, where a clean or process filter the submodule's config names would run (the isolated git dir only
+ * neutralizes the parent's config); a changed submodule commit is a gitlink directory and is dropped below with the
+ * other non-file entries. The separate document walk reads only filesystem metadata.
+ */
 export async function changedFiles(root: string, window: TurnWindow): Promise<string[]> {
-  const status = await git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"]);
-  if (status.code !== 0) return [];
-  const paths = status.stdout
-    .split("\0")
-    .filter((entry) => entry.length > 3 && !entry.slice(0, 2).includes("D"))
-    .map((entry) => entry.slice(3))
-    .slice(0, MAX_STATUS_ENTRIES);
+  const repo = await repoInfo(root);
+  if (!repo) return [];
+  const read = async (label: string, args: string[]): Promise<string[]> => {
+    const result = await isolatedStatus(repo, root, args).catch((error) => {
+      log(`artifact git ${label} errored: ${String(error).slice(0, 200)}`);
+      return null;
+    });
+    if (!result) return [];
+    if (result.code !== 0) {
+      log(`artifact git ${label} failed (${result.code}): ${result.stderr.trim().slice(0, 200)}`);
+      return [];
+    }
+    return result.stdout.split("\0").filter((entry) => entry.length > 0);
+  };
+  const [tracked, untracked] = await Promise.all([
+    read("diff", ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "--no-renames", "--ignore-submodules=dirty", "HEAD"]),
+    read("ls-files", ["ls-files", "-z", "--others", "--exclude-standard"]),
+  ]);
+  const paths = [...new Set([...tracked, ...untracked])].slice(0, MAX_STATUS_ENTRIES);
   const kept = await Promise.all(
     paths.map(async (path) => {
       const stat = await lstat(join(root, path)).catch(() => null);

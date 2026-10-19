@@ -1,6 +1,6 @@
 {
   "name": "paseo-turn-report",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "One card per agent turn in Paseo: the project check, the agent's claims against the commands it ran, merge conflicts with other agents, and changed documents.",

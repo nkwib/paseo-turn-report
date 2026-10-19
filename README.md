@@ -36,7 +36,15 @@ npm test
 
 Tests create temporary Git repositories, so they need `git` 2.38 or later on `PATH`.
 
-`test/install.test.ts` compiles a `git archive` of `HEAD`, with no `node_modules`, using Paseo's own plugin compiler at the manifest's minimum version and at v0.11.4 (`PASEO_REFS` overrides the list). It needs a getpaseo/paseo checkout with `node_modules` installed, found through `PASEO_SOURCE` or next to this repository as `paseo-main`, and is skipped with that reason otherwise.
+CI compiles a clean `git archive` of `HEAD`, with no `node_modules`, against the released Paseo 0.11.2, 0.11.4 and 0.12.0 compilers. It also reads the manifest and evaluates the server contribution with each host's own runtime. Missing host validation fails those jobs.
+
+Run the same check locally with an installed Paseo CLI prefix:
+
+```sh
+PASEO_RUNTIME=/path/to/paseo-prefix PASEO_REQUIRE_INSTALL=1 npm test -- test/install.test.ts
+```
+
+For development builds, set `PASEO_SOURCE` to a dependency-ready getpaseo/paseo checkout. The test always compiles that checkout; `PASEO_REFS=v0.11.2,v0.11.4,v0.12.0` additionally selects compiler refs that must exist in it. Without either host variable, the ordinary test run skips host validation and states why. Invalid explicit host paths and missing requested refs fail rather than skip. Commit changes before this check: it validates `HEAD`, not uncommitted files.
 
 ## License
 

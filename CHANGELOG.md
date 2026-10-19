@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.1 (unreleased)
+
+### Fixed
+
+- Stop treating masked shell exits, skipped commands and nonexecuting test/build flags as proof that checks passed. Agent commands and the project check now use the same conservative evidence rules.
+- Invalidate stale verification after shell writes and reject evidence from another directory. An unrelated successful command no longer supports a verification claim.
+- Recognize ordinary passing-test summaries while rejecting mixed failure statements and negative claims.
+- Prevent passive Git inspection from running configured filters or hooks, including artifact discovery.
+- Invalidate older passing proof judgments when loading saved reports.
+- Validate clean Git archives against the released Paseo 0.11.2, 0.11.4 and 0.12.0 hosts in CI. Required host validation fails instead of silently skipping.
+
 ## 0.1.0 (2026-10-19)
 
 First public release.

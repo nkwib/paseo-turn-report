@@ -4,7 +4,7 @@ import { z } from "zod";
 // Renderer kinds must match the app's contribution id rule /^[a-z][a-z0-9-]*$/ (packages/app/src/plugins/evaluate.ts:40).
 // The daemon accepts any kind on append, so a dotted kind appends fine and then breaks the whole client bundle.
 export const REPORT_KIND = "turn-report-card";
-export const REPORT_VERSION = 2;
+export const REPORT_VERSION = 3;
 
 export const MAX_TAIL_CHARS = 2_000;
 /** Reports the plugin keeps; the board asks for all of them. */
@@ -88,7 +88,9 @@ export type ClaimKind = z.infer<typeof ClaimKindSchema>;
 
 // background: Claude Code moved the command to the background, and no end was reported in the turn.
 // unknown: a test, build or lint run whose exit status the line does not return (piped without pipefail, `|| true`, more commands after it).
-export const OutcomeSchema = z.enum(["ok", "failed", "denied", "canceled", "running", "background", "unknown"]);
+// elsewhere: a test, build or lint run outside the agent's repository (`cd /other && npm test`, or a Codex call cwd elsewhere).
+// stale: a pass recorded by v0.1.0, which kept neither the call's directory nor every command after it; Re-run does not count it.
+export const OutcomeSchema = z.enum(["ok", "failed", "denied", "canceled", "running", "background", "unknown", "elsewhere", "cwd_unknown", "stale"]);
 export type Outcome = z.infer<typeof OutcomeSchema>;
 
 export const ProofCommandSchema = z.object({
@@ -127,6 +129,8 @@ export const ProofSchema = z.object({
     pluginPassed: z.boolean().nullable(),
   }),
   claims: z.array(ClaimVerdictSchema),
+  /** The judging rules the proof was built with; absent for proofs from v0.1.0. */
+  rules: z.number().int().optional(),
 });
 export type ProofReport = z.infer<typeof ProofSchema>;
 
@@ -150,8 +154,24 @@ export type TurnReport = z.infer<typeof TurnReportSchema>;
 // A v1 proof was judged by older rules, so a v1 report loads without it.
 const TurnReportV1Schema = TurnReportSchema.extend({ proof: z.unknown().optional().transform((): null => null) });
 
+/** Proofs built today; older ones are read again before a re-run judges them (server/proof.ts evidenceFromProof). */
+export const PROOF_RULES = 2;
+
+export const OLDER_RULES_NOTE = "judged by an older version of the plugin; Re-run to judge again";
+
+// A v2 proof's passes may rest on rules since fixed (an echoed `$?` it could not read, an `ls` as the agent's own check,
+// a shell edit after the test, a check piped into tail). Its failures stand; a pass reads "not checked" until Re-run.
+const TurnReportV2Schema = TurnReportSchema.transform((report): TurnReport => {
+  if (!report.proof) return report;
+  const claims = report.proof.claims.map((claim) =>
+    claim.verdict === "verified" || claim.verdict === "checked" ? { ...claim, verdict: "unchecked" as const, reason: `${claim.reason} (${OLDER_RULES_NOTE})` } : claim,
+  );
+  return { ...report, proof: { ...report.proof, claims } };
+});
+
 export const REPORT_SCHEMAS: ReadonlyMap<number, z.ZodType<TurnReport>> = new Map<number, z.ZodType<TurnReport>>([
   [1, TurnReportV1Schema],
+  [2, TurnReportV2Schema],
   [REPORT_VERSION, TurnReportSchema],
 ]);
 

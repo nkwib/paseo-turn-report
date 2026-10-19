@@ -1,6 +1,7 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import type { ClaimVerdict, Outcome, ProofReport, TurnReport, TurnReportSettings, Verdict, VerifyReport, VerifyState } from "../shared/report";
 import { CHECK_ALREADY_RUNNING, escapeHidden, hasHiddenCharacters, NOT_A_GIT_REPOSITORY } from "../shared/report";
+import { commandResult } from "../shared/command-kind";
 
 // From the SDK, not @getpaseo/protocol: a Git install has no node_modules to resolve it from.
 type MutableDaemonConfig = Awaited<ReturnType<PluginClientContext["paseo"]["config"]["get"]>>["config"];
@@ -223,12 +224,15 @@ export const OUTCOMES: Readonly<Record<Outcome, { icon: string; tone: Tone; labe
   running: { icon: "CircleMinus", tone: "muted", label: "running" },
   background: { icon: "Clock", tone: "muted", label: "in background" },
   unknown: { icon: "CircleHelp", tone: "muted", label: "exit unknown" },
+  elsewhere: { icon: "CircleHelp", tone: "muted", label: "other directory" },
+  cwd_unknown: { icon: "CircleHelp", tone: "muted", label: "directory unknown" },
+  stale: { icon: "CircleHelp", tone: "muted", label: "not counted" },
 };
 
 export function proofFacts(proof: ProofReport): string {
-  const count = (outcome: Outcome) => proof.commands.filter((c) => c.outcome === outcome).length;
+  const count = (outcome: Outcome) => new Set(proof.commands.filter((c) => c.outcome === outcome).map((c) => c.index)).size;
   const denied = count("denied") + proof.deniedTools.length;
-  const tally = [`${count("failed")} failed`, `${denied} denied`, `${count("background")} in background`, `${count("unknown")} exit unknown`].filter((part) => !part.startsWith("0 "));
+  const tally = [`${count("failed")} failed`, `${denied} denied`, `${count("background")} in background`, `${count("unknown")} exit unknown`, `${count("elsewhere")} in another directory`, `${count("cwd_unknown")} directory unknown`].filter((part) => !part.startsWith("0 "));
   const parts = [[`${proof.commandsTotal} command${proof.commandsTotal === 1 ? "" : "s"}`, ...tally].join(", ")];
   parts.push(`${proof.files.length} file${proof.files.length === 1 ? "" : "s"} written${proof.testFiles.length ? ` (${proof.testFiles.length} test)` : ""}`);
   if (proof.failedTools.length) parts.push(`${proof.failedTools.length} failed tool${proof.failedTools.length === 1 ? "" : "s"}`);
@@ -249,14 +253,28 @@ export function checkProvenance(proof: ProofReport, verifyState: VerifyState): s
         ? "agent started it in the background, no result"
         : agentRan.outcome === "unknown"
           ? "agent ran it, exit unknown (piped or chained)"
-          : `agent ran it${agentRan.exitCode !== null ? ` (exit ${agentRan.exitCode})` : agentRan.outcome === "failed" ? " (failed)" : ""}`;
+          : agentRan.outcome === "elsewhere"
+            ? "agent ran it in another directory"
+            : agentRan.outcome === "cwd_unknown"
+              ? "agent's directory is unknown after a directory change"
+              : agentRan.outcome === "stale"
+                ? "agent's run recorded by an older version, not counted"
+                : `agent ran it${agentRan.exitCode !== null ? ` (exit ${agentRan.exitCode})` : agentRan.outcome === "failed" ? " (failed)" : ""}`;
   const plugin = pluginPassed === null ? (PLUGIN_CHECK_NOT_RUN[verifyState] ?? "plugin check pending") : `plugin ${pluginPassed ? "passed" : "failed"}`;
   return `${escapeHidden(command)}: ${agent}; ${plugin}`;
+}
+
+const UNCOUNTED_CHECK = "This command can hide failures or does not run a recognized check. Its exit status alone will not verify the agent's claims.";
+
+/** The same rule the proof applies to the plugin check (server/proof.ts countedCheck), on success. */
+function countsAsProof(command: string): boolean {
+  const { runs } = commandResult(command, undefined, 0);
+  return runs.some((run) => run.kind !== "other") && runs.every((run) => run.status === "own" && run.cwd === null);
 }
 
 /** The paseo.json command a card asks to approve, as shown: hidden characters escaped, and then no approval. */
 export function approvalPrompt(verify: Pick<VerifyReport, "command">): { command: string; approvable: boolean; warning: string | null } {
   const command = verify.command ?? "";
-  if (!hasHiddenCharacters(command)) return { command, approvable: true, warning: null };
+  if (!hasHiddenCharacters(command)) return { command, approvable: true, warning: countsAsProof(command) ? null : UNCOUNTED_CHECK };
   return { command: escapeHidden(command), approvable: false, warning: "This command has hidden characters (control, zero-width or bidi), shown escaped. Fix paseo.json: it cannot be approved." };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approvalPrompt, boardSummary, checkProvenance, claimLine, footerSummary, canOpenInDocViewer, checkRan, collisionLabel, docViewerEnabled, docViewerFor, latestPerAgent, overallTone, verifyLabel } from "../client/format";
+import { approvalPrompt, boardSummary, checkProvenance, claimLine, footerSummary, canOpenInDocViewer, checkRan, collisionLabel, docViewerEnabled, docViewerFor, latestPerAgent, overallTone, proofFacts, verifyLabel } from "../client/format";
 import { CHECK_ALREADY_RUNNING, NOT_A_GIT_REPOSITORY, type TurnReport, type Verdict } from "../shared/report";
 
 function report(id: string, agentId: string, patch: { verify?: Partial<TurnReport["verify"]>; collisions?: Partial<TurnReport["collisions"]>; verdicts?: Verdict[] } = {}): TurnReport {
@@ -98,6 +98,13 @@ describe("board", () => {
     expect(collisionLabel(report("x", "a", { collisions: { items: [conflict] } }))).toBe("2 files conflict with beta");
     expect(collisionLabel(report("x", "a", { collisions: { peersChecked: 0 } }))).toBe("No other agents");
   });
+
+  it("counts one shell call once when it contains both a build and a test", () => {
+    const proof = report("r", "a", { verdicts: ["unsupported"] }).proof!;
+    proof.commandsTotal = 1;
+    proof.commands = ["build", "test"].map((kind) => ({ command: "npm run build && npm test", kind: kind as "build" | "test", index: 2, exitCode: null, outcome: "unknown" }));
+    expect(proofFacts(proof)).toBe("1 command, 1 exit unknown · 0 files written");
+  });
 });
 
 describe("check approval", () => {
@@ -112,6 +119,23 @@ describe("check approval", () => {
     expect(approvalPrompt(verify("npm\u200b test #\u202e\u2066x\u{E0041}")).command).toBe("npm\\u200B test #\\u202E\\u2066x\\u{E0041}");
     // Tabs and new lines are visible: a multi-line command can be approved.
     expect(approvalPrompt(verify("npm run build\n\tnpm test")).approvable).toBe(true);
+  });
+
+  it("warns that a check whose exit status is not a run's own will not count as proof (review N1)", () => {
+    const verify = (command: string) => report("r", "a", { verify: { state: "needs_approval", command, exitCode: null } }).verify;
+    const warning = "This command can hide failures or does not run a recognized check. Its exit status alone will not verify the agent's claims.";
+    for (const command of ["npm test | tail -5", "npm test || true", "npm test; echo done", "jest --listTests", "make ci"]) {
+      expect([command, approvalPrompt(verify(command))]).toEqual([command, { command, approvable: true, warning }]);
+    }
+    for (const command of ["npm test", "npm run build && npm test", "set -o pipefail; npm test | tail -5"]) {
+      expect([command, approvalPrompt(verify(command)).warning]).toEqual([command, null]);
+    }
+  });
+
+  it("says when the agent's run of the check was in another directory", () => {
+    const { proof } = report("r", "a", { verdicts: ["unsupported"] });
+    const check = { ...proof!, check: { command: "npm test", agentRan: { exitCode: null, outcome: "elsewhere" as const }, pluginPassed: null } };
+    expect(checkProvenance(check, "skipped")).toBe("npm test: agent ran it in another directory; plugin check skipped");
   });
 
   it("escapes hidden characters wherever the card quotes a command: the check line and claim reasons", () => {

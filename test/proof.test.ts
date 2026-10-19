@@ -163,7 +163,8 @@ describe("extractEvidence", () => {
       ["pnpm vitest run", "test", 1, "failed"],
       ["git status", "other", 0, "ok"],
       ["pytest -q", "test", 2, "failed"],
-      ["npx tsc --noEmit", "build", null, "ok"],
+      // Claude Code marks a non-zero Bash exit is_error, so a completed call exited 0.
+      ["npx tsc --noEmit", "build", 0, "ok"],
     ]);
   });
 
@@ -359,38 +360,26 @@ describe("judgeClaims", () => {
     expect(judgeClaims(matchClaims("Done."), failed, null)[0]?.verdict).toBe("contradicted");
   });
 
-  it("takes an exit-0 command after the last edit as the agent's own check of 'verified', below a test, build or lint run", () => {
+  it("backs 'verified' only with a test, build or lint run or the plugin check, never with an ad-hoc exit 0 (review F5)", () => {
     const verified = matchClaims("Verified both files exist.");
     const adHoc = extractEvidence([user("go"), claudeEdit("make_report.py"), codexShell("ls -la out/", 0, "completed")]);
-    expect(judgeClaims(verified, adHoc, null)[0]).toMatchObject({ verdict: "checked", reason: "ls -la out/ exited 0" });
-    expect(judgeClaims(verified, adHoc, { command: "npm test", passed: true })[0]).toMatchObject({ verdict: "verified", reason: "check passed: npm test" });
-    expect(judgeClaims(verified, adHoc, { command: "npm test", passed: false })[0]).toMatchObject({ verdict: "check_failed", reason: "agent's ls -la out/ exited 0, check failed: npm test" });
+    expect(judgeClaims(verified, adHoc, null)[0]).toMatchObject({ verdict: "unsupported", reason: "no matching command ran after the last edit" });
+    expect(judgeClaims(verified, adHoc, { command: "npm test", passed: true })[0]).toMatchObject({ verdict: "verified", reason: "agent ran none, check passed: npm test" });
+    expect(judgeClaims(verified, adHoc, { command: "npm test", passed: false })[0]).toMatchObject({ verdict: "check_failed", reason: "agent ran none, check failed: npm test" });
     const tested = extractEvidence([user("go"), claudeEdit("make_report.py"), claudeBashFailed("npm test", 1), codexShell("ls -la out/", 0, "completed")]);
     expect(judgeClaims(verified, tested, null)[0]?.verdict).toBe("contradicted");
-    const stale = extractEvidence([user("go"), codexShell("ls -la out/", 0, "completed"), claudeEdit("make_report.py")]);
-    expect(judgeClaims(verified, stale, null)[0]?.verdict).toBe("unsupported");
-    expect(judgeClaims(testsPass, adHoc, null)[0]?.verdict).toBe("unsupported");
+    for (const command of ["git status", "cat out/report.txt", "echo ok", "ls out/ | head"]) {
+      const ev = extractEvidence([user("go"), claudeEdit("make_report.py"), claudeBashOk(command)]);
+      expect([command, judgeClaims(matchClaims("Verified."), ev, null)[0]?.verdict]).toEqual([command, "unsupported"]);
+    }
   });
 
-  it("a failed command after the agent's last exit-0 one cancels 'checked by the agent'", () => {
-    const verified = matchClaims("Verified the PDF has 2 pages.");
-    const check = '.venv/bin/python -c "assert pages == 2"';
-    const canceled = extractEvidence([user("go"), claudeEdit("make_report.py"), codexShell("ls -la out/", 0, "completed"), codexShell(check, 1, "failed"), say("Verified the PDF has 2 pages.")]);
-    expect(judgeClaims(verified, canceled, null)[0]).toMatchObject({ verdict: "unsupported", reason: `no matching command ran after the last edit (failed after the last exit-0 one: ${check} (exit 1))` });
-    expect(judgeClaims(verified, canceled, { command: "npm test", passed: true })[0]?.verdict).toBe("verified");
-    expect(judgeClaims(verified, canceled, { command: "npm test", passed: false })[0]?.verdict).toBe("check_failed");
-    // Claude's shape: the exit code only in the error text.
-    const claude = extractEvidence([user("go"), claudeEdit("make_report.py"), claudeBashOk("ls out/"), claudeBashFailed("python check.py", 2)]);
-    expect(judgeClaims(verified, claude, null)[0]?.verdict).toBe("unsupported");
-
-    // A failure before the exit-0 run, a denial, or a failure with no known exit code cancels nothing.
-    const fixedLater = extractEvidence([user("go"), claudeEdit("make_report.py"), codexShell(check, 1, "failed"), codexShell("ls -la out/", 0, "completed")]);
-    expect(judgeClaims(verified, fixedLater, null)[0]).toMatchObject({ verdict: "checked", reason: "ls -la out/ exited 0" });
-    const denied = extractEvidence([user("go"), claudeEdit("make_report.py"), codexShell("ls -la out/", 0, "completed"), claudeDenied("soffice --headless out/metrics.xlsx")]);
-    expect(judgeClaims(verified, denied, null)[0]?.verdict).toBe("checked");
-    const noCode: AgentTimelineItem = { type: "tool_call", callId: "x", name: "Bash", status: "failed", detail: { type: "shell", command: "python check.py" }, error: { type: "tool_result", is_error: true, content: "Command timed out" } };
-    const unknownExit = extractEvidence([user("go"), claudeEdit("make_report.py"), codexShell("ls -la out/", 0, "completed"), noCode]);
-    expect(judgeClaims(verified, unknownExit, null)[0]?.verdict).toBe("checked");
+  it("keeps the unsettled note when a read-only command follows a piped or background run (review F5)", () => {
+    const verified = matchClaims("Verified.");
+    const piped = extractEvidence([user("go"), claudeEdit("src/a.ts"), claudeBashOk("npm test | tail -5"), claudeBashOk("git status")]);
+    expect(judgeClaims(verified, piped, null)[0]).toMatchObject({ verdict: "unsupported", reason: "no matching command ran after the last edit (exit unknown, piped or chained: npm test | tail -5)" });
+    const background = extractEvidence([user("go"), claudeEdit("src/a.ts"), claudeBackground("npm test", "bg1"), claudeBashOk("git status")]);
+    expect(judgeClaims(verified, background, null)[0]).toMatchObject({ verdict: "unsupported", reason: "no matching command ran after the last edit (in background, no result: npm test)" });
   });
 
   it("never contradicts a claim with a denied run: the command did not run", () => {
@@ -467,7 +456,10 @@ describe("judgeClaims", () => {
       expect([command, failedLine.commands[0]?.outcome, passedLine.commands[0]?.outcome]).toEqual([command, "unknown", "unknown"]);
     }
     // With pipefail, or when the test's status reaches the end of the line, the run settles.
-    const settles = ["set -o pipefail; npx vitest run | tail -5", "set -euo pipefail\nnpx vitest run 2>&1 | tail -5", "npm run build && npm test", "cd web && npm test 2>&1", 'npm test; echo "exit: $?"', "npm test && echo ok", "timeout 60 npm test"];
+    // A failed `npm run build && npm test` does not say which run failed; on success both passed.
+    expect(extractEvidence([user("go"), codexShell("npm run build && npm test", 1, "failed")]).commands.map((c) => [c.kind, c.outcome])).toEqual([["build", "unknown"], ["test", "unknown"]]);
+    expect(extractEvidence([user("go"), codexShell("npm run build && npm test", 0, "completed")]).commands.map((c) => [c.kind, c.outcome])).toEqual([["build", "ok"], ["test", "ok"]]);
+    const settles = ["set -o pipefail; npx vitest run | tail -5", "set -euo pipefail\nnpx vitest run 2>&1 | tail -5", "cd web && npm test 2>&1", "npm test && echo ok", "timeout 60 npm test"];
     for (const command of settles) {
       expect([command, extractEvidence([user("go"), codexShell(command, 1, "failed")]).commands[0]?.outcome]).toEqual([command, "failed"]);
     }
@@ -520,12 +512,12 @@ describe("judgeClaims", () => {
   });
 
   it("quotes only the first line of a long or multi-line command", () => {
-    const script = `.venv/bin/python - <<'PY'\nfrom pypdf import PdfReader\nprint(len(PdfReader("out/weekly-report.pdf").pages))\nPY`;
-    const ev = extractEvidence([user("go"), claudeEdit("make_report.py"), codexShell(script, 0, "completed")]);
-    expect(judgeClaims(matchClaims("Verified."), ev, null)[0]?.reason).toBe(".venv/bin/python - <<'PY' ... exited 0");
-    const long = `node -e "${"x".repeat(100)}"`;
-    const ev2 = extractEvidence([user("go"), codexShell(long, 0, "completed")]);
-    expect(judgeClaims(matchClaims("Verified."), ev2, null)[0]?.reason).toBe(`${long.slice(0, 77)}... exited 0`);
+    const script = `pytest -q <<'PY'\nignored\nPY`;
+    const ev = extractEvidence([user("go"), claudeEdit("make_report.py"), codexShell(script, 1, "failed")]);
+    expect(judgeClaims(matchClaims("Verified."), ev, null)[0]?.reason).toBe("last test command failed: pytest -q <<'PY' ... (exit 1)");
+    const long = `pytest -k "${"x".repeat(100)}"`;
+    const ev2 = extractEvidence([user("go"), codexShell(long, 1, "failed")]);
+    expect(judgeClaims(matchClaims("Verified."), ev2, null)[0]?.reason).toBe(`last test command failed: ${long.slice(0, 77)}... (exit 1)`);
   });
 });
 
@@ -542,7 +534,8 @@ describe("recorded agent runs", async () => {
       say("Fixed `add` in `calc/math.mjs`: it returned `a - b`. `node test.mjs` passes now."),
     ];
     const proof = buildProof(extractEvidence(turn), t4bCheck.command, t4bCheck, "claude");
-    expect(proof.claims.map((c) => c.verdict)).toEqual(["mismatch"]);
+    // "`node test.mjs` passes now." is a tests_pass claim too (review F9).
+    expect(proof.claims.map((c) => [c.kind, c.verdict])).toEqual([["fixed", "mismatch"], ["tests_pass", "mismatch"]]);
     expect(claimLine(proof.claims[0]!)).toBe('"fixed": agent and check disagree, agent\'s run passed (node test.mjs; echo "exit: $?"), check failed: node test.mjs && node test-e2e.mjs');
     expect([proofLabel(proof), proofTone(proof)]).toEqual(["Agent and check disagree", "warning"]);
   });
@@ -560,7 +553,7 @@ describe("recorded agent runs", async () => {
     expect(proofLabel(proof)).toBe("Agent and check disagree");
   });
 
-  it("Codex T1: 'Verified both files exist' after its own ls reads checked by the agent, not unverified", () => {
+  it("Codex T1: 'Verified both files exist' after its own ls stays unverified, not backed (review F5)", () => {
     const turn = [
       user("Write make_report.py ... Run it with .venv/bin/python and confirm both files exist."),
       codexPatch("make_report.py"),
@@ -569,11 +562,11 @@ describe("recorded agent runs", async () => {
       say("Wrote make_report.py and ran it with .venv/bin/python. Verified both files exist: out/weekly-report.pdf and out/metrics.xlsx."),
     ];
     const proof = buildProof(extractEvidence(turn), null, null, "codex");
-    expect(claimLine(proof.claims[0]!)).toBe('"verified": checked by the agent, ls -la out/ exited 0');
-    expect([proofLabel(proof), proofTone(proof)]).toEqual(["Checked by the agent", "muted"]);
+    expect(claimLine(proof.claims[0]!)).toBe('"verified": unverified, no matching command ran after the last edit');
+    expect([proofLabel(proof), proofTone(proof)]).toEqual(["Claim unverified", "warning"]);
   });
 
-  it("Codex T2: 'Verified the PDF still has 2 pages' after its own Python check", () => {
+  it("Codex T2: 'Verified the PDF still has 2 pages' after its own Python check stays unverified (review F5)", () => {
     const pages = `.venv/bin/python -c "import re; print(len(re.findall(rb'/Type\\s*/Page\\b', open('out/weekly-report.pdf','rb').read())))"`;
     const turn = [
       user("Review notes from the document viewer. ..."),
@@ -583,8 +576,8 @@ describe("recorded agent runs", async () => {
       say("Lightened the table header, shaded the weekend rows and corrected the Thursday highlight. Verified the PDF still has 2 pages."),
     ];
     const proof = buildProof(extractEvidence(turn), null, null, "codex");
-    expect(proof.claims.map((c) => [c.kind, c.verdict])).toEqual([["verified", "checked"]]);
-    expect(proofTone(proof)).toBe("muted");
+    expect(proof.claims.map((c) => [c.kind, c.verdict])).toEqual([["verified", "unsupported"]]);
+    expect(proofTone(proof)).toBe("warning");
   });
 });
 
@@ -665,7 +658,7 @@ describe("proof labels", async () => {
     const turns = [
       [user("fix sum"), say("Fixed. Done.")],
       [user("fix sum"), claudeEdit("src/math.ts"), say("Fixed. Done.")],
-      // An ad-hoc exit 0 backs "verified" as the agent's own check, never "fixed" or "done".
+      // An ad-hoc exit 0 backs no claim.
       [user("fix sum"), claudeEdit("src/math.ts"), claudeBashOk("ls src/"), say("Fixed. Done.")],
     ];
     for (const turn of turns) {
@@ -681,5 +674,161 @@ describe("proof labels", async () => {
       expect(overallTone(report)).toBe("muted");
       expect(overallTone({ ...report, verify: { ...verify, state: "needs_approval", command: "npm test" } })).toBe("muted");
     }
+  });
+});
+
+describe("second-pass review fixes", () => {
+  const testsPass = matchClaims("All tests pass.");
+  const verdictOf = (turn: AgentTimelineItem[], message = "All tests pass.", plugin: { command: string; passed: boolean } | null = null, context?: { root: string; cwd: string }) =>
+    judgeClaims(matchClaims(message), extractEvidence(turn, context), plugin).map((c) => [c.kind, c.verdict, c.reason]);
+
+  it("reads an echoed `$?` only when the line prints it in a form it can parse back (review F1)", () => {
+    const edit = claudeEdit("src/a.ts");
+    // The plain form still works both ways.
+    expect(verdictOf([user("go"), edit, claudeBashEcho('npm test; echo "exit: $?"', "FAIL a.test.ts\nexit: 1")])[0]?.[1]).toBe("contradicted");
+    expect(verdictOf([user("go"), edit, claudeBashEcho('npm test; echo "exit: $?"', "ok\nexit: 0")])[0]?.[1]).toBe("verified");
+    // An echo that does not print the status, or whose line is missing from the output, settles nothing.
+    for (const [command, output] of [
+      ["npm test; echo done", "FAIL a.test.ts\ndone"],
+      ['npm test; echo "exit: $?"', "FAIL a.test.ts"],
+      ["npm test; echo", "FAIL a.test.ts\n"],
+      ['npm test; echo "finished"', "FAIL a.test.ts\nfinished"],
+    ]) {
+      expect([command, verdictOf([user("go"), edit, claudeBashEcho(command!, output!)])[0]?.[1]]).toEqual([command, "unsupported"]);
+    }
+    // Whatever the echo shape, an echoed failure never reads as a pass.
+    expect(verdictOf([user("go"), edit, claudeBashEcho('npm test; echo "exit: $?" >&2', "FAIL a.test.ts\nexit: 1")])[0]?.[1]).not.toBe("verified");
+  });
+
+  it("applies the same shape rules to the plugin check: a check whose status is not its own is not counted (review N1)", () => {
+    const turn = [user("go"), claudeEdit("src/a.ts"), say("All tests pass.")];
+    for (const command of ["npm test | tail -5", "npm test || true", "npm test; echo done", "jest --listTests", "cd /tmp/other && npm test"]) {
+      const [claim] = judgeClaims(testsPass, extractEvidence(turn), { command, passed: true });
+      expect([command, claim?.verdict]).toEqual([command, "unsupported"]);
+      expect(claim?.reason).toMatch(/check not counted/);
+    }
+    // A plain check still decides, both ways.
+    expect(judgeClaims(testsPass, extractEvidence(turn), { command: "npm test", passed: true })[0]).toMatchObject({ verdict: "verified", reason: "agent ran none, check passed: npm test" });
+    expect(judgeClaims(testsPass, extractEvidence(turn), { command: "npm test", passed: false })[0]?.verdict).toBe("check_failed");
+    expect(judgeClaims(testsPass, extractEvidence(turn), { command: "set -o pipefail; npm test | tail -5", passed: false })[0]?.verdict).toBe("check_failed");
+    // A failed uncounted check cannot turn the agent's passing run into a disagreement.
+    const ran = [user("go"), claudeEdit("src/a.ts"), claudeBashOk("npm test")];
+    expect(judgeClaims(testsPass, extractEvidence(ran), { command: "npm test | tail -5", passed: false })[0]?.verdict).toBe("verified");
+  });
+
+  it("ends the 'after the last edit' scope at a shell command that writes files (review F6)", () => {
+    for (const write of ["sed -i 's/a/b/' src/a.ts", "cat > src/a.ts <<'EOF'\nexport const a = 1;\nEOF", "git checkout other -- src", "echo x > src/a.ts", "git stash", "cp /tmp/a.ts src/a.ts"]) {
+      const turn = [user("go"), claudeEdit("src/a.ts"), claudeBashOk("npm test"), claudeBashOk(write)];
+      expect([write, verdictOf(turn)[0]?.[1]]).toEqual([write, "unsupported"]);
+    }
+    // Reading commands do not.
+    for (const read of ["cat src/a.ts", "git status", "git diff", "grep -n a src/a.ts", "ls src"]) {
+      const turn = [user("go"), claudeEdit("src/a.ts"), claudeBashOk("npm test"), claudeBashOk(read)];
+      expect([read, verdictOf(turn)[0]?.[1]]).toEqual([read, "verified"]);
+    }
+  });
+
+  it("does not count a run in another directory for this workspace (review F6)", () => {
+    const context = { root: "/repo", cwd: "/repo" };
+    const edit = claudeEdit("/repo/src/a.ts");
+    expect(verdictOf([user("go"), edit, claudeBashOk("cd /tmp/other && npm test")], undefined, null, context)[0]).toEqual([
+      "tests_pass",
+      "unsupported",
+      "no matching command ran after the last edit (in another directory: cd /tmp/other && npm test)",
+    ]);
+    // Codex reports the directory a command ran in.
+    const elsewhere: AgentTimelineItem = { type: "tool_call", callId: "c", name: "shell", status: "completed", error: null, detail: { type: "shell", command: "npm test", cwd: "/other", output: "", exitCode: 0 } };
+    expect(verdictOf([user("go"), edit, elsewhere], undefined, null, context)[0]?.[1]).toBe("unsupported");
+    const inside: AgentTimelineItem = { ...elsewhere, detail: { type: "shell", command: "npm test", cwd: "/repo/web", output: "", exitCode: 0 } } as AgentTimelineItem;
+    expect(verdictOf([user("go"), edit, inside], undefined, null, context)[0]?.[1]).toBe("verified");
+    expect(verdictOf([user("go"), edit, claudeBashOk("cd web && npm test")], undefined, null, context)[0]?.[1]).toBe("verified");
+    expect(verdictOf([user("go"), edit, claudeBashOk("cd ../other && npm test")], undefined, null, context)[0]?.[1]).toBe("unsupported");
+    const ev = extractEvidence([user("go"), edit, claudeBashOk("cd /tmp/other && npm test")], context);
+    expect(ev.commands.map((c) => [c.kind, c.outcome])).toEqual([["test", "elsewhere"]]);
+  });
+
+  it("keeps each run's kind on a line that runs several (review F9)", () => {
+    const turn = [user("go"), claudeEdit("src/a.ts"), claudeBashOk("npm run build && npm test")];
+    expect(verdictOf(turn, "The build succeeds. All tests pass.").map(([kind, verdict]) => [kind, verdict])).toEqual([
+      ["build_ok", "verified"],
+      ["tests_pass", "verified"],
+    ]);
+    expect(extractEvidence(turn).commands.map((c) => [c.kind, c.exitCode, c.outcome])).toEqual([
+      ["build", 0, "ok"],
+      ["test", 0, "ok"],
+    ]);
+    // When the line failed, which run failed is unknown: neither contradicts nor verifies.
+    const failed = [user("go"), claudeEdit("src/a.ts"), claudeBashFailed("npm run build && npm test", 1)];
+    expect(verdictOf(failed, "The build succeeds. All tests pass.").map(([kind, verdict]) => [kind, verdict])).toEqual([
+      ["build_ok", "unsupported"],
+      ["tests_pass", "unsupported"],
+    ]);
+  });
+
+  it("reads a zero count only when it stands alone, and keeps other failure words a negation (review N2)", () => {
+    for (const sentence of [
+      "Tests pass on Node 20.0 failed on 18.",
+      "Build succeeds except v2.0 failed to build.",
+      "All tests pass apart from 1.0 failed requests.",
+      "Tests pass, no test failed but 3 were skipped and 2 crashed.",
+      "Tests pass (fail 0, error 4).",
+      "Tests pass, 0 failed, 2 errored.",
+      "The build succeeds with 3 errors.",
+      "Tests pass but the e2e run broke.",
+    ]) {
+      expect([sentence, matchClaims(sentence)]).toEqual([sentence, []]);
+    }
+    for (const sentence of ["Tests pass: 2 passed and 0 failed.", "12 passed, 0 failed.", "All tests pass (0 failing).", "Tests pass: pass 5, fail 0.", "All 5 tests pass, no tests failed.", "Tests pass, failed: 0.", "Tests: 42 passed, 0 failed."]) {
+      expect([sentence, matchClaims(sentence).map((c) => c.kind)]).toEqual([sentence, ["tests_pass"]]);
+    }
+    for (const sentence of ["The build succeeds with 0 errors.", "No type errors.", "Typecheck passes with no errors."]) {
+      expect([sentence, matchClaims(sentence).map((c) => c.kind)]).toEqual([sentence, ["build_ok"]]);
+    }
+    for (const sentence of ["2 passed and 0 failed, but I didn't run the e2e suite.", "Tests pass: 2 passed, 0 failed, 1 failed to compile.", "Tests pass: 10 failed, 0 failed in unit.", "Not all tests pass: 0 failed, 3 errored.", "0 tests failed to run."]) {
+      expect([sentence, matchClaims(sentence)]).toEqual([sentence, []]);
+    }
+  });
+
+  it("finds the claim phrasings it missed, and none in negations or quoted text (review F9)", () => {
+    const kinds = (message: string) => matchClaims(message).map((c) => c.kind);
+    for (const sentence of ["Tests passed!", "Tests are all passing.", "`npm test` passes.", "The suite is green.", "The test suite is passing.", "`npx vitest run` passed."]) {
+      expect([sentence, kinds(sentence)]).toEqual([sentence, ["tests_pass"]]);
+    }
+    for (const sentence of ["Typecheck passes.", "`npm run build` succeeds.", "`tsc --noEmit` passes."]) {
+      expect([sentence, kinds(sentence)]).toEqual([sentence, ["build_ok"]]);
+    }
+    expect(kinds("Build: OK. Tests: OK.")).toEqual(["build_ok", "tests_pass"]);
+    for (const sentence of ["None of the tests pass.", "No tests pass.", "`npm run lint` passes.", 'The issue title is "All tests pass on CI".', "You asked me to make sure “the build succeeds”."]) {
+      expect([sentence, kinds(sentence)]).toEqual([sentence, []]);
+    }
+  });
+
+  it("re-run reads a stored command again with today's rules, so an old false green does not survive (migration)", () => {
+    const oldProof = {
+      provider: "claude",
+      commands: [{ command: "npm test; echo done", kind: "test" as const, exitCode: 0, outcome: "ok" as const, index: 2 }],
+      commandsTotal: 1,
+      failedTools: [],
+      deniedTools: [],
+      files: ["src/a.ts"],
+      testFiles: [],
+      lastEditIndex: 1,
+      check: { command: null, agentRan: null, pluginPassed: null },
+      claims: [{ kind: "tests_pass" as const, text: "All tests pass.", verdict: "verified" as const, reason: "npm test; echo done passed" }],
+    };
+    const again = buildProof(evidenceFromProof(oldProof), null, null, "claude");
+    expect(again.claims.map((c) => [c.verdict, c.reason])).toEqual([["unsupported", "no matching command ran after the last edit (recorded by an older version: npm test; echo done)"]]);
+    expect(again.commands.map((c) => c.outcome)).toEqual(["stale"]);
+    // The check runs again on Re-run, and decides; a recorded failure still contradicts.
+    expect(buildProof(evidenceFromProof(oldProof), "npm test", { command: "npm test", passed: true }, "claude").claims.map((c) => c.verdict)).toEqual(["verified"]);
+    const failedOld = { ...oldProof, commands: [{ command: "npm test", kind: "test" as const, exitCode: 1, outcome: "failed" as const, index: 2 }] };
+    expect(buildProof(evidenceFromProof(failedOld), null, null, "claude").claims.map((c) => c.verdict)).toEqual(["contradicted"]);
+    // A stored shell write after the test ends the scope too.
+    const write = { ...oldProof, commands: [{ ...oldProof.commands[0]!, command: "npm test" }, { command: "sed -i s/a/b/ src/a.ts", kind: "other" as const, exitCode: 0, outcome: "ok" as const, index: 3 }], commandsTotal: 2 };
+    expect(buildProof(evidenceFromProof(write), null, null, "claude").claims.map((c) => c.verdict)).toEqual(["unsupported"]);
+    // A proof built with today's rules is judged the same on re-run.
+    const fresh = buildProof(extractEvidence([user("go"), claudeEdit("src/a.ts"), claudeBashEcho('npm test; echo "exit: $?"', "ok\nexit: 0"), say("All tests pass.")]), null, null, "claude");
+    expect(fresh.claims.map((c) => c.verdict)).toEqual(["verified"]);
+    expect(buildProof(evidenceFromProof(fresh), null, null, "claude").claims.map((c) => c.verdict)).toEqual(["verified"]);
   });
 });

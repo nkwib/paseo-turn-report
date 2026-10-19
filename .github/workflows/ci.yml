@@ -22,3 +22,24 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  host-compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        paseo: ["0.11.2", "0.11.4", "0.12.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Install released Paseo host
+        run: npm install --prefix "$RUNNER_TEMP/paseo-host" --ignore-scripts --no-audit --no-fund "@getpaseo/cli@${{ matrix.paseo }}"
+      - name: Compile and activate a clean Git archive
+        run: npm test -- test/install.test.ts
+        env:
+          PASEO_RUNTIME: ${{ runner.temp }}/paseo-host
+          PASEO_REQUIRE_INSTALL: "1"

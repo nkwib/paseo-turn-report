@@ -434,6 +434,38 @@ describe("report service", () => {
   });
 });
 
+describe("report service, proof context", () => {
+  it("does not count an agent's test run in another directory for this workspace (review F6)", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tr-svc-ctx-"));
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+    sh(root, "init", "-q", "-b", "main", "repo");
+    const repo = join(root, "repo");
+    await writeFile(join(repo, "f.txt"), "one\n");
+    sh(repo, "add", "-A");
+    sh(repo, "commit", "-qm", "base");
+    const { paseo } = fakePaseo([]);
+    const service = createReportService(async () => ({ ...DEFAULT_SETTINGS, verify: false, collisions: false, artifacts: false }), NO_STORE);
+    const codexRun = (cwd: string): AgentTimelineItem => ({ type: "tool_call", callId: `c-${cwd}`, name: "shell", status: "completed", error: null, detail: { type: "shell", command: "npm test", cwd, output: "", exitCode: 0 } });
+    const judge = async (turnId: string, items: AgentTimelineItem[]) => {
+      const agent = hookAgent(`A${turnId}`, repo);
+      service.turnStarted(agent, turnId);
+      service.turnEnded({ agent, turnId, outcome: { kind: "completed" }, timeline: [{ type: "user_message", text: "go" }, ...items, { type: "assistant_message", text: "All tests pass." }] }, paseo);
+      await service.idle();
+      return service.recent(null, 1)[0]?.proof?.claims.map((c) => [c.verdict, c.reason]);
+    };
+    expect(await judge("t1", [codexRun(join(root, "elsewhere"))])).toEqual([["unsupported", "no matching command ran this turn (in another directory: npm test)"]]);
+    expect(await judge("t2", [codexRun(repo)])).toEqual([["verified", "npm test passed"]]);
+    expect(await judge("t3", [{ type: "tool_call", callId: "b", name: "Bash", status: "completed", error: null, detail: { type: "shell", command: `cd ${root} && npm test`, output: "" } }])).toEqual([
+      ["unsupported", expect.stringMatching(/^no matching command ran this turn \(in another directory: cd /)],
+    ]);
+    expect(await judge("t4", [
+      { type: "tool_call", callId: "prior-cd", name: "Bash", status: "completed", error: null, detail: { type: "shell", command: `cd ${root}`, output: "" } },
+      { type: "user_message", text: "check now" },
+      { type: "tool_call", callId: "current-test", name: "Bash", status: "completed", error: null, detail: { type: "shell", command: "npm test", output: "" } },
+    ])).toEqual([["unsupported", "no matching command ran this turn (directory unreported after a previous directory change: npm test)"]]);
+  });
+});
+
 describe("stored reports", () => {
   const stored = (id: string, durationMs: number): TurnReport => ({
     id, agentId: "a", agentTitle: "a", workspaceId: "w", turnId: id, cwd: "/r", branch: "main", startedAt: null, endedAt: "2026-10-17T22:00:00.000Z",

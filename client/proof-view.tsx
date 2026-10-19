@@ -25,7 +25,8 @@ export function ProofSection({ proof, verifyState, colors, compact }: { proof: P
   const muted = { color: colors.foregroundMuted };
   const fg = { color: colors.foreground };
   const provenance = checkProvenance(proof, verifyState);
-  const shown = proof.commands.slice(compact ? -3 : -5);
+  // One shell call can support several kinds of claim. Show its command once.
+  const shown = proof.commands.filter((c, i, all) => all.findIndex((other) => other.index === c.index) === i).slice(compact ? -3 : -5);
   return (
     <View style={[styles.section, { borderColor: tone === "muted" ? colors.border : accent }]} accessibilityLabel="Proof">
       <View style={styles.row}>
