@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -7,11 +7,8 @@ import { detectCollisions } from "../server/collisions";
 
 const sh = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } }).trim();
 
-async function countFiles(dir: string): Promise<number> {
-  let n = 0;
-  for (const entry of await readdir(dir, { withFileTypes: true, recursive: true })) if (entry.isFile()) n++;
-  return n;
-}
+// Compare stored objects, excluding transient files and pack metadata in Git's object directory.
+const objectIds = (cwd: string) => sh(cwd, "cat-file", "--batch-all-objects", "--batch-check=%(objectname)").split("\n").filter(Boolean).sort();
 
 describe("detectCollisions (real git)", () => {
   let root: string;
@@ -45,7 +42,7 @@ describe("detectCollisions (real git)", () => {
   it("lists files that would conflict with each peer and leaves every worktree and index untouched", async () => {
     const common = join(root, "repo/.git");
     const before = {
-      objects: await countFiles(join(common, "objects")),
+      objects: objectIds(a),
       statusA: sh(a, "status", "--porcelain"),
       statusB: sh(b, "status", "--porcelain"),
       indexA: (await stat(join(common, "worktrees/wt-a/index"))).mtimeMs,
@@ -62,7 +59,7 @@ describe("detectCollisions (real git)", () => {
     expect(report.items).toEqual([
       { agentId: "agent-b", agentTitle: "B agent", branch: "b", files: [{ path: "math.js", kind: "content" }, { path: "notes.md", kind: "add/add" }], moreFiles: 0 },
     ]);
-    expect(await countFiles(join(common, "objects"))).toBe(before.objects);
+    expect(objectIds(a)).toEqual(before.objects);
     expect(sh(a, "status", "--porcelain")).toBe(before.statusA);
     expect(sh(b, "status", "--porcelain")).toBe(before.statusB);
     expect((await stat(join(common, "worktrees/wt-a/index"))).mtimeMs).toBe(before.indexA);
