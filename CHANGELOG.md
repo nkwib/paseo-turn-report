@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- The documents chip is muted. Amber is for something to look at, and a changed document is not.
+
 ## 0.1.2 (2026-10-19)
 
 - Add reproducible HD listing images composed from real screenshots.
