@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approvalPrompt, boardSummary, checkProvenance, claimLine, footerSummary, canOpenInDocViewer, checkRan, collisionLabel, docViewerEnabled, docViewerFor, latestPerAgent, overallTone, proofFacts, verifyLabel } from "../client/format";
+import { approvalPrompt, artifactLabel, boardSummary, checkProvenance, claimLine, documentsSection, footerSummary, checkRan, collisionLabel, latestPerAgent, overallTone, proofFacts, verifyLabel } from "../client/format";
 import { CHECK_ALREADY_RUNNING, NOT_A_GIT_REPOSITORY, type TurnReport, type Verdict } from "../shared/report";
 
 function report(id: string, agentId: string, patch: { verify?: Partial<TurnReport["verify"]>; collisions?: Partial<TurnReport["collisions"]>; verdicts?: Verdict[] } = {}): TurnReport {
@@ -20,30 +20,34 @@ function report(id: string, agentId: string, patch: { verify?: Partial<TurnRepor
 
 const conflict = { agentId: "b", agentTitle: "beta", branch: "b", files: [{ path: "math.js", kind: "content" }, { path: "notes.md", kind: "add/add" }], moreFiles: 0 };
 
-describe("documents next to the doc viewer", () => {
-  it("leaves the file list to the doc viewer only when its plugin is configured and enabled", () => {
-    const viewer = { source: "directory" as const, path: "/plugins/doc-viewer" };
-    const id = "paseo-doc-viewer";
-    expect(docViewerEnabled({ pluginsEnabled: true, plugins: { [id]: viewer } }, id)).toBe(true);
-    expect(docViewerEnabled({ pluginsEnabled: true, plugins: { [id]: { ...viewer, enabled: false } } }, id)).toBe(false);
-    expect(docViewerEnabled({ pluginsEnabled: false, plugins: { [id]: viewer } }, id)).toBe(false);
-    expect(docViewerEnabled({ pluginsEnabled: true, plugins: {} }, id)).toBe(false);
-    expect(docViewerEnabled({ pluginsEnabled: true, plugins: { [id]: viewer } }, "")).toBe(false);
+describe("documents section", () => {
+  const pdf = { path: "out/a.pdf", kind: "pdf", size: 1, status: "new" as const };
+  const svg = { path: "chart.svg", kind: "image", size: 1, status: "new" as const };
+  const withArtifacts = (artifacts: Partial<TurnReport["artifacts"]>) => ({ ...report("r", "a"), artifacts: { state: "done" as const, items: [], more: 0, note: null, ...artifacts } });
+  const docViewer = { pluginId: "paseo-doc-viewer" };
+
+  it("counts every document in the chip, with or without the viewer", () => {
+    expect(artifactLabel(withArtifacts({ items: [pdf, svg] }))).toBe("2 documents");
+    expect(artifactLabel(withArtifacts({ items: [pdf], more: 3, docViewer }))).toBe("4 documents");
+    expect(artifactLabel(withArtifacts({ items: [pdf], docViewer }))).toBe("1 document");
+    expect(artifactLabel(withArtifacts({ docViewer }))).toBe("No documents");
+    expect(artifactLabel(withArtifacts({ state: "pending", docViewer }))).toBe("Scanning documents");
+    expect(artifactLabel(withArtifacts({ state: "skipped" }))).toBe("Documents off");
   });
 
-  it("offers Open only when the doc viewer is on, never into a disabled or unknown plugin", () => {
-    const settings = { openWithPluginId: "paseo-doc-viewer" };
-    expect(docViewerFor(settings, "srv", "on")).toBe("paseo-doc-viewer");
-    expect(docViewerFor(settings, "srv", "off")).toBeNull();
-    expect(docViewerFor(settings, "srv", "unknown")).toBeNull();
-    expect(docViewerFor({ openWithPluginId: "" }, "srv", "on")).toBeNull();
-    expect(docViewerFor(settings, "", "on")).toBeNull();
-    expect(docViewerFor(null, "srv", "on")).toBeNull();
+  it("lists every document of a report with no viewer stamp, as reports before it did", () => {
+    expect(documentsSection(withArtifacts({ items: [pdf, svg], more: 2 }), false)).toEqual({ line: null, items: [pdf, svg], more: 2 });
   });
 
-  it("offers Open only for file types the doc viewer renders", () => {
-    for (const path of ["out/report.pdf", "a.docx", "b.xlsx", "c.csv", "d.pptx", "e.png", "f.JPG", "g.jpeg", "h.gif", "i.webp", "log.jsonl"]) expect(canOpenInDocViewer(path)).toBe(true);
-    for (const path of ["out/chart.svg", "nb.ipynb", "README", "dir.pdf/notes.txt"]) expect(canOpenInDocViewer(path)).toBe(false);
+  it("folds a stamped report into one line with the count, and the line opens the full list", () => {
+    const stamped = withArtifacts({ items: [pdf, svg], more: 2, docViewer });
+    expect(documentsSection(stamped, false)).toEqual({ line: "4 documents", items: [], more: 0 });
+    expect(documentsSection(stamped, true)).toEqual({ line: "4 documents", items: [pdf, svg], more: 2 });
+    expect(documentsSection(withArtifacts({ items: [pdf], docViewer }), false).line).toBe("1 document");
+  });
+
+  it("has nothing to show for a turn with no documents", () => {
+    for (const docViewerStamp of [undefined, docViewer]) expect(documentsSection(withArtifacts({ docViewer: docViewerStamp }), true)).toEqual({ line: null, items: [], more: 0 });
   });
 });
 

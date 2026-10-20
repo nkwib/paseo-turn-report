@@ -1,10 +1,6 @@
-import type { PluginClientContext } from "@getpaseo/plugin/client";
-import type { ClaimVerdict, Outcome, ProofReport, TurnReport, TurnReportSettings, Verdict, VerifyReport, VerifyState } from "../shared/report";
+import type { Artifact, ClaimVerdict, Outcome, ProofReport, TurnReport, Verdict, VerifyReport, VerifyState } from "../shared/report";
 import { CHECK_ALREADY_RUNNING, escapeHidden, hasHiddenCharacters, NOT_A_GIT_REPOSITORY } from "../shared/report";
 import { commandResult } from "../shared/command-kind";
-
-// From the SDK, not @getpaseo/protocol: a Git install has no node_modules to resolve it from.
-type MutableDaemonConfig = Awaited<ReturnType<PluginClientContext["paseo"]["config"]["get"]>>["config"];
 
 export type Tone = "success" | "danger" | "warning" | "muted";
 
@@ -70,12 +66,30 @@ export function collisionLabel(report: TurnReport): string {
   return `${files} ${files === 1 ? "file conflicts" : "files conflict"} with ${who}`;
 }
 
+const documentCount = (n: number) => `${n} ${n === 1 ? "document" : "documents"}`;
+
 export function artifactLabel(report: TurnReport): string {
   const a = report.artifacts;
   if (a.state === "pending") return "Scanning documents";
   if (a.state !== "done") return "Documents off";
   const n = a.items.length + a.more;
-  return n === 0 ? "No documents" : `${n} ${n === 1 ? "document" : "documents"}`;
+  return n === 0 ? "No documents" : documentCount(n);
+}
+
+export interface DocumentsSection {
+  /** The count as the one line that opens the list; null when the list shows in full. */
+  line: string | null;
+  items: readonly Artifact[];
+  more: number;
+}
+
+/** With the viewer plugin enabled when the turn ended, the list folds into its count until opened. Never fewer documents, only folded. */
+export function documentsSection(report: TurnReport, open: boolean): DocumentsSection {
+  const { items, more, docViewer } = report.artifacts;
+  const total = items.length + more;
+  if (total === 0) return { line: null, items: [], more: 0 };
+  if (!docViewer) return { line: null, items, more };
+  return { line: documentCount(total), items: open ? items : [], more: open ? more : 0 };
 }
 
 export function formatDuration(ms: number): string {
@@ -111,35 +125,14 @@ export const ARTIFACT_ICONS: Readonly<Record<string, string>> = {
   docx: "FileText",
   xlsx: "FileSpreadsheet",
   csv: "FileSpreadsheet",
+  parquet: "Database",
   pptx: "Presentation",
+  video: "FileVideoCamera",
+  audio: "FileAudio",
   image: "Image",
   jsonl: "FileJson",
   ipynb: "NotebookPen",
 };
-
-/**
- * A plugin can read the daemon's configured plugins, not which ones are running.
- */
-export function docViewerEnabled(config: Pick<MutableDaemonConfig, "pluginsEnabled" | "plugins">, pluginId: string): boolean {
-  const entry = config.plugins?.[pluginId];
-  return config.pluginsEnabled === true && entry !== undefined && entry.enabled !== false;
-}
-
-export type DocViewerState = "unknown" | "on" | "off";
-
-/** The plugin the Open button goes to: only one the daemon has enabled, so Open never lands on a disabled plugin. */
-export function docViewerFor(settings: Pick<TurnReportSettings, "openWithPluginId"> | null, serverId: string, docViewer: DocViewerState): string | null {
-  return settings?.openWithPluginId && serverId && docViewer === "on" ? settings.openWithPluginId : null;
-}
-
-// Extensions the doc viewer (nkwib/doc-viewer 0.5) opens. By extension, not kind: "image" also covers SVG, which it does not render.
-const DOC_VIEWER_EXTENSIONS = new Set(["pdf", "docx", "xlsx", "csv", "pptx", "png", "jpg", "jpeg", "gif", "webp", "jsonl"]);
-
-export function canOpenInDocViewer(path: string): boolean {
-  const name = path.slice(path.lastIndexOf("/") + 1);
-  const dot = name.lastIndexOf(".");
-  return dot > 0 && DOC_VIEWER_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
-}
 
 /**
  * One status per report for the board, the worst of check, collisions and proof: red = check failed or a claim

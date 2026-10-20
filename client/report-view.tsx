@@ -2,7 +2,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { copyText, Icon, useToast } from "@getpaseo/plugin/client/react-native";
 import { useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import type { Artifact, TurnReport } from "../shared/report";
+import type { TurnReport } from "../shared/report";
 import { escapeHidden } from "../shared/report";
 import { ProofSection } from "./proof-view";
 import {
@@ -12,9 +12,9 @@ import {
   proofLabel,
   proofTone,
   artifactLabel,
-  canOpenInDocViewer,
   checkRan,
   collisionLabel,
+  documentsSection,
   formatDuration,
   formatSize,
   verifyLabel,
@@ -28,7 +28,6 @@ export interface ReportActions {
   rerun?: (report: TurnReport) => void;
   /** Settles when the approval request does; the button stays disabled until then. */
   approveCheck?: (report: TurnReport) => Promise<void>;
-  openArtifact?: (report: TurnReport, artifact: Artifact) => void;
   openAgent?: (agentId: string) => void;
 }
 
@@ -64,12 +63,13 @@ function Chip({ colors, icon, label, tone }: { colors: Colors; icon: string; lab
   );
 }
 
-function SmallButton({ colors, icon, label, onPress, disabled = false }: { colors: Colors; icon: string; label: string; onPress: () => void; disabled?: boolean }) {
+function SmallButton({ colors, icon, label, onPress, disabled = false, expanded }: { colors: Colors; icon: string; label: string; onPress: () => void; disabled?: boolean; expanded?: boolean }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
+      aria-expanded={expanded}
       disabled={disabled}
       onPress={onPress}
       hitSlop={6}
@@ -84,24 +84,25 @@ function SmallButton({ colors, icon, label, onPress, disabled = false }: { color
 /** One-line glance: check, collisions, documents. */
 export function ReportChips({ report, colors }: { report: TurnReport; colors: Colors }) {
   const collisionTone: Tone = report.collisions.items.length > 0 ? "danger" : report.collisions.state === "done" ? "success" : "muted";
-  const docCount = report.artifacts.items.length + report.artifacts.more;
   const proofChip = report.proof ? proofTone(report.proof) : "muted";
   return (
     <View style={styles.chips}>
       {report.proof && (proofChip === "danger" || proofChip === "warning") ? <Chip colors={colors} icon={PROOF_ICONS[proofChip]} label={proofLabel(report.proof)} tone={proofChip} /> : null}
       <Chip colors={colors} icon={verifyIcon(report)} label={verifyLabel(report)} tone={verifyTone(report.verify.state)} />
       <Chip colors={colors} icon="GitMerge" label={collisionLabel(report)} tone={collisionTone} />
-      <Chip colors={colors} icon="Files" label={artifactLabel(report)} tone={docCount > 0 ? "warning" : "muted"} />
+      <Chip colors={colors} icon="Files" label={artifactLabel(report)} tone="muted" />
     </View>
   );
 }
 
-export function ReportBody({ report, colors, actions, compact, showDocuments }: { report: TurnReport; colors: Colors; actions: ReportActions; compact: boolean; showDocuments: boolean }) {
+export function ReportBody({ report, colors, actions, compact }: { report: TurnReport; colors: Colors; actions: ReportActions; compact: boolean }) {
   const toast = useToast();
   const v = report.verify;
   const failed = v.state === "failed" || v.state === "gave_up" || v.state === "retrying" || v.state === "busy";
   const [showTail, setShowTail] = useState(failed);
   const [approving, setApproving] = useState(false);
+  const [documentsOpen, setDocumentsOpen] = useState(false);
+  const documents = documentsSection(report, documentsOpen);
   const approve = () => {
     if (approving || !actions.approveCheck) return;
     setApproving(true);
@@ -190,7 +191,12 @@ export function ReportBody({ report, colors, actions, compact, showDocuments }: 
       ))}
       {report.collisions.note && report.collisions.state === "error" ? <Text style={[styles.meta, { color: colors.statusDanger }]}>{report.collisions.note}</Text> : null}
 
-      {(showDocuments ? report.artifacts.items : []).map((artifact) => (
+      {documents.line ? (
+        <View style={styles.rowWrap}>
+          <SmallButton colors={colors} icon={documentsOpen ? "ChevronDown" : "ChevronRight"} label={documents.line} expanded={documentsOpen} onPress={() => setDocumentsOpen(!documentsOpen)} />
+        </View>
+      ) : null}
+      {documents.items.map((artifact) => (
         <View key={artifact.path} style={styles.fileRow}>
           <Icon name={ARTIFACT_ICONS[artifact.kind] ?? "File"} size={14} color={colors.foregroundMuted} />
           <View style={styles.flex}>
@@ -201,15 +207,12 @@ export function ReportBody({ report, colors, actions, compact, showDocuments }: 
               {artifact.status} · {formatSize(artifact.size)}
             </Text>
           </View>
-          {actions.openArtifact && canOpenInDocViewer(artifact.path) ? (
-            <SmallButton colors={colors} icon="ExternalLink" label="Open" onPress={() => actions.openArtifact?.(report, artifact)} />
-          ) : null}
           <Pressable accessibilityRole="button" accessibilityLabel={`Copy path ${artifact.path}`} hitSlop={8} onPress={() => copy(joinPath(report.cwd, artifact.path), "path")} style={styles.iconButton}>
             <Icon name="Copy" size={14} color={colors.foregroundMuted} />
           </Pressable>
         </View>
       ))}
-      {showDocuments && report.artifacts.more > 0 ? <Text style={[styles.meta, muted]}>+{report.artifacts.more} more documents</Text> : null}
+      {documents.more > 0 ? <Text style={[styles.meta, muted]}>+{documents.more} more documents</Text> : null}
     </View>
   );
 }

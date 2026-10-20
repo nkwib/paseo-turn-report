@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- While the PDF and Office viewer plugin is enabled in the daemon config, the documents list starts as one line with the count ("4 documents") on the card and the board, and the line opens the full list. Every document is stored with the report either way, so a wrong guess about the viewer only changes whether the list starts folded. Reports from 0.1.x show the full list.
+- Open is gone from the board. It sent paths relative to the repository root to a viewer that resolves them against the workspace directory, so a workspace inside a repository opened "File not found", and it reached the viewer through the app's private route, because a plugin cannot open another plugin's screen. The "Open documents with plugin" setting is now "Document viewer plugin" and keeps its stored value.
+
+### Fixed
+
+- The documents list misses no type the PDF and Office viewer opens: TSV, NDJSON, Parquet, video, audio, TIFF and HEIC are added. A test pins the list against the viewer's.
+- The documents chip is muted. Amber is for something to look at, and a changed document is not.
+
 ## 0.1.2 (2026-10-19)
 
 - Add reproducible HD listing images composed from real screenshots.

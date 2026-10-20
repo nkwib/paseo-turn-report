@@ -1,12 +1,13 @@
 import { realpath } from "node:fs/promises";
 import type { PluginHookAgent } from "@getpaseo/plugin/server";
-import type { TurnReport, TurnReportSettings, VerifyReport } from "../shared/report";
+import type { ArtifactsReport, TurnReport, TurnReportSettings, VerifyReport } from "../shared/report";
 import { CHECK_ALREADY_RUNNING, hasHiddenCharacters, MAX_REPORTS, REPORT_KIND, REPORT_VERSION, TurnReportSchema } from "../shared/report";
 import { createCheckApprovals, type CheckApprovals } from "./approvals";
 import type { AgentTimelineItem, PaseoApi } from "./host-types";
 import { changedFiles, collectArtifacts, type TurnWindow } from "./artifacts";
 import { buildProof, evidenceFromProof, extractEvidence, sliceTurn, toRepoPath, unreportedCwdAfter, type PluginCheck, type RunContext, type TurnEvidence } from "./proof";
 import { detectCollisions, type PeerAgent } from "./collisions";
+import { enabledInConfig } from "./doc-viewer";
 import { repoInfo } from "./git";
 import { IDLE, stepRetry, type RetryEvent, type RetryState } from "./retry";
 import { followUpMessage, resolveCheckCommand, runCheck } from "./verify";
@@ -34,6 +35,17 @@ function subjectOf(origin: ReportOrigin): ReportSubject {
   }
   const { agent, turnId } = origin.event;
   return { id: origin.reportId, agentId: agent.id, agentTitle: agent.title ?? agent.id.slice(0, 8), workspaceId: agent.workspaceId, turnId, cwd: agent.cwd, provider: agent.provider, startedAtMs: origin.startedAtMs };
+}
+
+/** Whether the viewer plugin is enabled as the turn ends, so the card folds the list. A re-run keeps the turn's own answer. */
+async function docViewerOf(origin: ReportOrigin, paseo: PaseoApi, pluginId: string): Promise<ArtifactsReport["docViewer"]> {
+  if (origin.kind === "rerun") return origin.report.artifacts.docViewer && { pluginId: origin.report.artifacts.docViewer.pluginId };
+  try {
+    return enabledInConfig((await paseo.config.get()).config, pluginId) ? { pluginId } : undefined;
+  } catch (error) {
+    log(`doc viewer check failed: ${String(error).slice(0, 200)}`);
+    return undefined;
+  }
 }
 
 function pluginCheckOf(verify: VerifyReport): PluginCheck | null {
@@ -258,8 +270,8 @@ export function createReportService(
             .catch((error) => patch({ collisions: { ...report.collisions, state: "error", note: String(error).slice(0, 300) } }))
         : null,
       settings.artifacts
-        ? collectArtifacts(report.cwd, window)
-            .then((artifacts) => patch({ artifacts }))
+        ? Promise.all([collectArtifacts(report.cwd, window), docViewerOf(origin, paseo, settings.openWithPluginId)])
+            .then(([artifacts, docViewer]) => patch({ artifacts: docViewer ? { ...artifacts, docViewer } : artifacts }))
             .catch((error) => patch({ artifacts: { ...report.artifacts, state: "error", note: String(error).slice(0, 300) } }))
         : null,
     ]);

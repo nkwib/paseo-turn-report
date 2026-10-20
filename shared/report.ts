@@ -80,6 +80,9 @@ export const ArtifactsSchema = z.object({
   items: z.array(ArtifactSchema),
   more: z.number(),
   note: z.string().nullable(),
+  // The document viewer plugin was enabled when the turn ended, so the card folds the list into one line. Every document is
+  // in `items` either way. Absent on reports from 0.1.x and when the viewer was off: the list shows in full.
+  docViewer: z.object({ pluginId: z.string() }).optional(),
 });
 export type ArtifactsReport = z.infer<typeof ArtifactsSchema>;
 

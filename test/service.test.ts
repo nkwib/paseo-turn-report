@@ -15,6 +15,7 @@ function fakePaseo(agents: { id: string; cwd: string; title: string }[]) {
   const appended: { agentId: string; data: TurnReport }[] = [];
   const sent: { agentId: string; text: string; behavior: unknown }[] = [];
   const paseo = {
+    config: { get: async () => ({ requestId: "r", config: {} }) },
     agents: {
       list: async () => ({ entries: agents.map((a) => ({ agent: { ...a, status: "idle", archivedAt: null } })) }),
       ref: (id: string) => ({

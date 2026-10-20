@@ -1,13 +1,12 @@
 import type { PluginClientContext, PluginScreenProps, PluginSidebarItemProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { useSettings } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { Icon, ScrollView } from "@getpaseo/plugin/client/react-native";
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
 import type { TurnReport } from "../shared/report";
-import { BOARD_LIMIT, recentReportsRpc, settingsDefinition } from "../shared/report";
-import { useDocViewer, useReportActions } from "./card";
+import { BOARD_LIMIT, recentReportsRpc } from "../shared/report";
+import { useReportActions } from "./card";
 import { boardSummary, footerSummary, latestPerAgent, overallTone, timeAgo } from "./format";
 import { ReportBody, ReportChips, toneColor } from "./report-view";
 
@@ -46,12 +45,10 @@ function Board({ client, scope, theme, host, compact, navigation, onScopeChange 
   onScopeChange?: (all: boolean) => void;
 }) {
   const colors = theme.colors;
-  const settings = useSettings(settingsDefinition);
   const { reports, error } = useReports(client, scope.workspaceId);
   const [open, setOpen] = useState<string | null>(null);
   const [history, setHistory] = useState(false);
-  const ready = settings.status === "ready" ? settings.values : null;
-  const base = useReportActions(client, host.id, ready, useDocViewer(client, ready?.openWithPluginId ?? null));
+  const base = useReportActions(client);
   const actions = { ...base, openAgent: navigation ? (agentId: string) => navigation.openAgent({ agentId, serverId: host.id }) : undefined };
   const list = history ? (reports ?? []) : latestPerAgent(reports ?? []);
   const summary = boardSummary(reports ?? []);
@@ -114,7 +111,7 @@ function Board({ client, scope, theme, host, compact, navigation, onScopeChange 
               <Icon name={expanded ? "ChevronDown" : "ChevronRight"} size={14} color={colors.foregroundMuted} />
             </Pressable>
             <ReportChips report={report} colors={colors} />
-            {expanded ? <ReportBody report={report} colors={colors} actions={actions} compact={compact} showDocuments /> : null}
+            {expanded ? <ReportBody report={report} colors={colors} actions={actions} compact={compact} /> : null}
           </View>
         );
       })}

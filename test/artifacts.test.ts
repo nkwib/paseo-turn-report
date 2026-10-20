@@ -1,8 +1,15 @@
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { artifactKind, collectArtifacts, selectArtifacts, type FileStat } from "../server/artifacts";
+import { ARTIFACT_KINDS, artifactKind, collectArtifacts, selectArtifacts, type FileStat } from "../server/artifacts";
+
+// The doc viewer's kinds.ts, when a checkout is at hand: DOC_VIEWER_SOURCE, or ../paseo-doc-viewer next to this one.
+const DOC_VIEWER_KINDS = [process.env.DOC_VIEWER_SOURCE ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../paseo-doc-viewer")]
+  .map((dir) => join(dir, "shared/kinds.ts"))
+  .find((path) => existsSync(path));
 
 const T0 = 1_760_000_000_000;
 const file = (path: string, mtimeOffset: number, birthOffset = -86_400_000, size = 10): FileStat => ({ path, mtimeMs: T0 + mtimeOffset, birthtimeMs: T0 + birthOffset, size });
@@ -44,6 +51,18 @@ describe("selectArtifacts", () => {
     expect(artifactKind("nb.ipynb")).toBe("ipynb");
     expect(artifactKind("pic.JPEG")).toBe("image");
     expect(artifactKind("main.rs")).toBeNull();
+  });
+
+  it("lists what the doc viewer opens (0.5.2 shared/kinds.ts), plus SVG and notebooks", () => {
+    const docViewer = ["pdf", "docx", "xlsx", "csv", "tsv", "jsonl", "ndjson", "parquet", "pptx", "mp4", "m4v", "mov", "webm", "mp3", "m4a", "wav", "flac", "png", "jpg", "jpeg", "gif", "tif", "tiff", "heic", "heif", "webp"];
+    expect(Object.keys(ARTIFACT_KINDS).sort()).toEqual([...docViewer, "svg", "ipynb"].sort());
+    expect([artifactKind("runs.tsv"), artifactKind("log.ndjson"), artifactKind("t.parquet"), artifactKind("demo.MOV"), artifactKind("a.flac"), artifactKind("p.HEIC")]).toEqual(["csv", "jsonl", "parquet", "video", "audio", "image"]);
+  });
+
+  it.skipIf(!DOC_VIEWER_KINDS)("matches the doc viewer checkout's kinds.ts", async () => {
+    const { DOCUMENT_KINDS, KIND_REGISTRY } = await import(DOC_VIEWER_KINDS!);
+    const extensions = (DOCUMENT_KINDS as string[]).flatMap((kind) => KIND_REGISTRY[kind].extensions as string[]);
+    expect(Object.keys(ARTIFACT_KINDS).filter((extension) => extension !== "svg" && extension !== "ipynb").sort()).toEqual(extensions.sort());
   });
 });
 

@@ -37,10 +37,15 @@ export function SettingsScreen({ theme }: PluginSurfaceProps) {
       <SettingsSection title="Collisions and documents">
         <SettingsCard>
           <SettingsSwitch label="Check conflicts with other live agents" value={values.collisions} onValueChange={(collisions) => save({ collisions })} />
-          <SettingsSwitch label="List documents changed during the turn" value={values.artifacts} onValueChange={(artifacts) => save({ artifacts })} />
+          <SettingsSwitch
+            label="List documents changed during the turn"
+            hint="While the document viewer plugin is enabled, the list starts as one line with the count."
+            value={values.artifacts}
+            onValueChange={(artifacts) => save({ artifacts })}
+          />
           <SettingsInput
-            label="Open documents with plugin"
-            hint="Plugin id with a 'document' screen. Empty: copy paths only."
+            label="Document viewer plugin"
+            hint="Plugin id. Empty: the list always shows in full."
             initialValue={values.openWithPluginId}
             onChangeText={(openWithPluginId) => save({ openWithPluginId: openWithPluginId.trim() })}
           />
