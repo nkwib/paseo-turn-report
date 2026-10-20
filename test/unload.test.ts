@@ -42,7 +42,7 @@ describe("plugin unload", () => {
     const { hooks, cleanup } = load({ checkCommand: `sleep 30 & echo $! > ${JSON.stringify(pidFile)}; wait`, collisions: false, artifacts: false });
     const paseo = { agents: { list: async () => ({ entries: [] }), ref: () => ({ status: "idle", refresh: async () => null, send: async () => {}, timeline: { append: async () => ({ seq: 1, epoch: "e" }) } }) } } as unknown as PaseoApi;
     const agent = { id: "A", cwd: root, title: "A", workspaceId: "ws", parentAgentId: null, provider: "mock" };
-    await hooks.get("agent.turn_started")!({ agent, turnId: "t1" });
+    await hooks.get("agent.turn_started")!({ agent, turnId: "t1" }, { paseo });
     const timeline = [{ type: "user_message", text: "go", messageId: "u" }, { type: "tool_call", callId: "c", name: "Bash", status: "completed", error: null, detail: { type: "shell", command: "ls", exitCode: 0 } }, { type: "assistant_message", text: "Done." }];
     await hooks.get("agent.turn_ended")!({ agent, turnId: "t1", outcome: { kind: "completed" }, timeline }, { paseo });
     expect(await until(() => existsSync(pidFile) && readFileSync(pidFile, "utf8").trim() !== "", 5_000)).toBe(true);

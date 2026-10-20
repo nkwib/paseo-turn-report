@@ -1,12 +1,13 @@
 import { realpath } from "node:fs/promises";
 import type { PluginHookAgent } from "@getpaseo/plugin/server";
-import type { TurnReport, TurnReportSettings, VerifyReport } from "../shared/report";
+import type { DocViewerCard, TurnReport, TurnReportSettings, VerifyReport } from "../shared/report";
 import { CHECK_ALREADY_RUNNING, hasHiddenCharacters, MAX_REPORTS, REPORT_KIND, REPORT_VERSION, TurnReportSchema } from "../shared/report";
 import { createCheckApprovals, type CheckApprovals } from "./approvals";
 import type { AgentTimelineItem, PaseoApi } from "./host-types";
 import { changedFiles, collectArtifacts, type TurnWindow } from "./artifacts";
 import { buildProof, evidenceFromProof, extractEvidence, sliceTurn, toRepoPath, unreportedCwdAfter, type PluginCheck, type RunContext, type TurnEvidence } from "./proof";
 import { detectCollisions, type PeerAgent } from "./collisions";
+import { createDocViewerProbe, type DocViewerProbe } from "./doc-viewer";
 import { repoInfo } from "./git";
 import { IDLE, stepRetry, type RetryEvent, type RetryState } from "./retry";
 import { followUpMessage, resolveCheckCommand, runCheck } from "./verify";
@@ -22,7 +23,7 @@ export interface TurnEnded {
 }
 
 type ReportOrigin =
-  | { kind: "turn" | "plugin_followup"; event: TurnEnded; reportId: string; startedAtMs: number | null; turn: AgentTimelineItem[] | null }
+  | { kind: "turn" | "plugin_followup"; event: TurnEnded; reportId: string; startedAtMs: number | null; turn: AgentTimelineItem[] | null; docViewer: Promise<DocViewerCard | null> }
   | { kind: "rerun"; report: TurnReport };
 
 type ReportSubject = Pick<TurnReport, "id" | "agentId" | "agentTitle" | "workspaceId" | "turnId" | "cwd"> & { provider: string; startedAtMs: number | null };
@@ -34,6 +35,13 @@ function subjectOf(origin: ReportOrigin): ReportSubject {
   }
   const { agent, turnId } = origin.event;
   return { id: origin.reportId, agentId: agent.id, agentTitle: agent.title ?? agent.id.slice(0, 8), workspaceId: agent.workspaceId, turnId, cwd: agent.cwd, provider: agent.provider, startedAtMs: origin.startedAtMs };
+}
+
+/** A re-run keeps the turn's doc viewer card, so it leaves the same documents to it. */
+async function docViewerOf(origin: ReportOrigin): Promise<DocViewerCard | null> {
+  if (origin.kind !== "rerun") return origin.docViewer;
+  const stamp = origin.report.artifacts.docViewer;
+  return stamp ? { pluginId: stamp.pluginId, root: stamp.root } : null;
 }
 
 function pluginCheckOf(verify: VerifyReport): PluginCheck | null {
@@ -64,7 +72,8 @@ async function evidenceOf(origin: ReportOrigin, root: string | null, cwd: string
 }
 
 export interface ReportService {
-  turnStarted(agent: PluginHookAgent, turnId: string | null): void;
+  /** Without `paseo` no document is left to the doc viewer. */
+  turnStarted(agent: PluginHookAgent, turnId: string | null, paseo?: PaseoApi): void;
   turnEnded(event: TurnEnded, paseo: PaseoApi): void;
   recent(workspaceId: string | null, limit: number): TurnReport[];
   rerun(reportId: string, paseo: PaseoApi): { ok: boolean; error: string | null };
@@ -86,8 +95,9 @@ export function createReportService(
   readSettings: () => Promise<TurnReportSettings>,
   persistence: ReportPersistence = { initial: [], save: () => {} },
   approvals: CheckApprovals = createCheckApprovals(null),
+  docViewerProbe: DocViewerProbe = createDocViewerProbe(),
 ): ReportService {
-  const turnStarts = new Map<string, { at: number; turnId: string | null }>();
+  const turnStarts = new Map<string, { at: number; turnId: string | null; docViewer: Promise<DocViewerCard | null> }>();
   // Timeline length at the previous turn end per agent: the next turn starts after it.
   const turnEnds = new Map<string, number>();
   const retry = new Map<string, RetryState>();
@@ -258,7 +268,8 @@ export function createReportService(
             .catch((error) => patch({ collisions: { ...report.collisions, state: "error", note: String(error).slice(0, 300) } }))
         : null,
       settings.artifacts
-        ? collectArtifacts(report.cwd, window)
+        ? docViewerOf(origin)
+            .then((card) => collectArtifacts(report.cwd, window, card))
             .then((artifacts) => patch({ artifacts }))
             .catch((error) => patch({ artifacts: { ...report.artifacts, state: "error", note: String(error).slice(0, 300) } }))
         : null,
@@ -270,8 +281,13 @@ export function createReportService(
   }
 
   return {
-    turnStarted(agent, turnId) {
-      turnStarts.set(agent.id, { at: Date.now(), turnId });
+    turnStarted(agent, turnId, paseo) {
+      const docViewer = paseo
+        ? readSettings()
+            .then((settings) => (settings.artifacts ? docViewerProbe.turnStarted(paseo, settings.openWithPluginId, agent.workspaceId) : null))
+            .catch((error) => (log(`doc viewer check failed: ${String(error).slice(0, 200)}`), null))
+        : Promise.resolve(null);
+      turnStarts.set(agent.id, { at: Date.now(), turnId, docViewer });
       step(agent.id, { type: "turn_started" }, 0);
     },
     turnEnded(event, paseo) {
@@ -295,7 +311,11 @@ export function createReportService(
       const reportId = `turn-report:${event.agent.id}:${event.turnId ?? start?.turnId ?? "turn"}:${startedAtMs ?? Date.now()}`;
       const turn = event.timeline ? sliceTurn(event.timeline, previousEnd) : null;
       const kind = retry.get(event.agent.id)?.kind === "in_followup" ? "plugin_followup" : "turn";
-      track(buildReport({ kind, event, reportId, startedAtMs, turn }, paseo).catch((error) => log(`report failed: ${String(error)}`)));
+      // Decided now, from the state the turn ran in: a later change to the viewer leaves this report as it is.
+      const docViewer = (start?.docViewer ?? Promise.resolve(null))
+        .then(async (card) => (card && (await docViewerProbe.turnEnded(paseo, card)) ? card : null))
+        .catch((error) => (log(`doc viewer check failed: ${String(error).slice(0, 200)}`), null));
+      track(buildReport({ kind, event, reportId, startedAtMs, turn, docViewer }, paseo).catch((error) => log(`report failed: ${String(error)}`)));
     },
     recent(workspaceId, limit) {
       const out: TurnReport[] = [];
