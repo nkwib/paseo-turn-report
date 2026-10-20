@@ -4,8 +4,8 @@
 
 ### Changed
 
-- Documents the PDF and Office viewer's card lists for a turn are left to it; the card and the board list the rest (SVG, notebooks, and files the viewer's scan skips). The plugin decides when the turn ends, from the viewer's state then and its "Turn cards" setting, and stores the result with the report. Older reports and turns the viewer had no card for list every document. The chip is hidden when the viewer covers all of them.
-- Open is gone from the board. It sent paths relative to the repository root to a viewer that resolves them against the workspace directory, so a workspace inside a repository opened "File not found". The "Open documents with plugin" setting is now "Document viewer plugin" and keeps its stored value.
+- While the PDF and Office viewer plugin is enabled in the daemon config, the documents list starts as one line with the count ("4 documents") on the card and the board, and the line opens the full list. Every document is stored with the report either way, so a wrong guess about the viewer only changes whether the list starts folded. Reports from 0.1.x show the full list.
+- Open is gone from the board. It sent paths relative to the repository root to a viewer that resolves them against the workspace directory, so a workspace inside a repository opened "File not found", and it reached the viewer through the app's private route, because a plugin cannot open another plugin's screen. The "Open documents with plugin" setting is now "Document viewer plugin" and keeps its stored value.
 
 ### Fixed
 
