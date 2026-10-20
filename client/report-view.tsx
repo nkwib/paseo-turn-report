@@ -14,6 +14,7 @@ import {
   artifactLabel,
   checkRan,
   collisionLabel,
+  documentsSection,
   formatDuration,
   formatSize,
   verifyLabel,
@@ -62,12 +63,13 @@ function Chip({ colors, icon, label, tone }: { colors: Colors; icon: string; lab
   );
 }
 
-function SmallButton({ colors, icon, label, onPress, disabled = false }: { colors: Colors; icon: string; label: string; onPress: () => void; disabled?: boolean }) {
+function SmallButton({ colors, icon, label, onPress, disabled = false, expanded }: { colors: Colors; icon: string; label: string; onPress: () => void; disabled?: boolean; expanded?: boolean }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
+      aria-expanded={expanded}
       disabled={disabled}
       onPress={onPress}
       hitSlop={6}
@@ -99,6 +101,8 @@ export function ReportBody({ report, colors, actions, compact }: { report: TurnR
   const failed = v.state === "failed" || v.state === "gave_up" || v.state === "retrying" || v.state === "busy";
   const [showTail, setShowTail] = useState(failed);
   const [approving, setApproving] = useState(false);
+  const [documentsOpen, setDocumentsOpen] = useState(false);
+  const documents = documentsSection(report, documentsOpen);
   const approve = () => {
     if (approving || !actions.approveCheck) return;
     setApproving(true);
@@ -187,7 +191,12 @@ export function ReportBody({ report, colors, actions, compact }: { report: TurnR
       ))}
       {report.collisions.note && report.collisions.state === "error" ? <Text style={[styles.meta, { color: colors.statusDanger }]}>{report.collisions.note}</Text> : null}
 
-      {report.artifacts.items.map((artifact) => (
+      {documents.line ? (
+        <View style={styles.rowWrap}>
+          <SmallButton colors={colors} icon={documentsOpen ? "ChevronDown" : "ChevronRight"} label={documents.line} expanded={documentsOpen} onPress={() => setDocumentsOpen(!documentsOpen)} />
+        </View>
+      ) : null}
+      {documents.items.map((artifact) => (
         <View key={artifact.path} style={styles.fileRow}>
           <Icon name={ARTIFACT_ICONS[artifact.kind] ?? "File"} size={14} color={colors.foregroundMuted} />
           <View style={styles.flex}>
@@ -203,7 +212,7 @@ export function ReportBody({ report, colors, actions, compact }: { report: TurnR
           </Pressable>
         </View>
       ))}
-      {report.artifacts.more > 0 ? <Text style={[styles.meta, muted]}>+{report.artifacts.more} more documents</Text> : null}
+      {documents.more > 0 ? <Text style={[styles.meta, muted]}>+{documents.more} more documents</Text> : null}
     </View>
   );
 }

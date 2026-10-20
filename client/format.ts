@@ -1,4 +1,4 @@
-import type { ClaimVerdict, Outcome, ProofReport, TurnReport, Verdict, VerifyReport, VerifyState } from "../shared/report";
+import type { Artifact, ClaimVerdict, Outcome, ProofReport, TurnReport, Verdict, VerifyReport, VerifyState } from "../shared/report";
 import { CHECK_ALREADY_RUNNING, escapeHidden, hasHiddenCharacters, NOT_A_GIT_REPOSITORY } from "../shared/report";
 import { commandResult } from "../shared/command-kind";
 
@@ -74,6 +74,22 @@ export function artifactLabel(report: TurnReport): string {
   if (a.state !== "done") return "Documents off";
   const n = a.items.length + a.more;
   return n === 0 ? "No documents" : documentCount(n);
+}
+
+export interface DocumentsSection {
+  /** The count as the one line that opens the list; null when the list shows in full. */
+  line: string | null;
+  items: readonly Artifact[];
+  more: number;
+}
+
+/** With the viewer plugin enabled when the turn ended, the list folds into its count until opened. Never fewer documents, only folded. */
+export function documentsSection(report: TurnReport, open: boolean): DocumentsSection {
+  const { items, more, docViewer } = report.artifacts;
+  const total = items.length + more;
+  if (total === 0) return { line: null, items: [], more: 0 };
+  if (!docViewer) return { line: null, items, more };
+  return { line: documentCount(total), items: open ? items : [], more: open ? more : 0 };
 }
 
 export function formatDuration(ms: number): string {
