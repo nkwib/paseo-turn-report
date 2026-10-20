@@ -83,6 +83,14 @@ describe("report versions", () => {
     expect(REPORT_SCHEMAS.get(REPORT_VERSION)!.parse(card).proof?.claims[0]?.verdict).toBe("verified");
   });
 
+  it("keeps the version across the viewer stamp: 0.1.x reports have none, the first build of it stored more", () => {
+    const current = REPORT_SCHEMAS.get(REPORT_VERSION)!;
+    const stamped = (docViewer: unknown) => current.parse({ ...card, artifacts: { ...card.artifacts, docViewer } }).artifacts.docViewer;
+    expect(current.parse(card).artifacts.docViewer).toBeUndefined();
+    expect(stamped({ pluginId: "paseo-doc-viewer" })).toEqual({ pluginId: "paseo-doc-viewer" });
+    expect(stamped({ pluginId: "paseo-doc-viewer", root: "/r", covered: 3 })).toEqual({ pluginId: "paseo-doc-viewer" });
+  });
+
   it("store: a v2 file loads with its old passes downgraded and saves as v3", async () => {
     const dir = await mkdtemp(join(tmpdir(), "tr-store-"));
     onTestFinished(() => rm(dir, { recursive: true, force: true }));

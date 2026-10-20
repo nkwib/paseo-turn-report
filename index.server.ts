@@ -31,7 +31,7 @@ export default function contribute(server: PluginServerContext) {
     },
   );
 
-  server.on("agent.turn_started", async ({ agent, turnId }, { paseo }) => (await ready).turnStarted(agent, turnId, paseo));
+  server.on("agent.turn_started", async ({ agent, turnId }) => (await ready).turnStarted(agent, turnId));
   // Returns at once: hooks have a 30 s budget, and the check can take minutes.
   server.on("agent.turn_ended", async ({ agent, turnId, outcome, timeline }, { paseo }) => (await ready).turnEnded({ agent, turnId, outcome, timeline }, paseo));
   server.handle(recentReportsRpc, async ({ workspaceId, limit }) => ({ reports: (await ready).recent(workspaceId, limit) }));

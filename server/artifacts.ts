@@ -1,6 +1,6 @@
-import { lstat, readdir, realpath } from "node:fs/promises";
+import { lstat, readdir } from "node:fs/promises";
 import { extname, join, relative, sep } from "node:path";
-import type { Artifact, ArtifactsReport, DocViewerCard } from "../shared/report";
+import type { Artifact, ArtifactsReport } from "../shared/report";
 import { MAX_ARTIFACTS } from "../shared/report";
 import { isolatedStatus, repoInfo } from "./git";
 
@@ -24,27 +24,6 @@ export const ARTIFACT_KINDS: Readonly<Record<string, string>> = Object.fromEntri
   Object.entries(KIND_EXTENSIONS).flatMap(([kind, extensions]) => extensions.map((extension) => [extension, kind])),
 );
 
-// What the doc viewer's turn card lists (paseo-doc-viewer shared/kinds.ts and server/recent.ts, scanWorkspace).
-export const DOC_VIEWER_EXTENSIONS: ReadonlySet<string> = new Set(Object.keys(ARTIFACT_KINDS).filter((extension) => extension !== "svg" && extension !== "ipynb"));
-const DOC_VIEWER_SKIP_DIRS = new Set(["node_modules", "__pycache__", "venv", "target", "vendor"]);
-const DOC_VIEWER_SKIP_PREFIXES = ["~$", "._"];
-const DOC_VIEWER_MAX_DEPTH = 16;
-
-/** Whether the doc viewer's scan reaches `path`, given relative to its workspace root with "/". */
-export function docViewerLists(path: string): boolean {
-  const parts = path.split("/");
-  const name = parts.pop()!;
-  const dot = name.lastIndexOf(".");
-  return (
-    parts.length <= DOC_VIEWER_MAX_DEPTH &&
-    // "" is an absolute path's root, and ".." (a dot folder too) leaves the workspace.
-    parts.every((dir) => dir !== "" && !dir.startsWith(".") && !DOC_VIEWER_SKIP_DIRS.has(dir)) &&
-    !DOC_VIEWER_SKIP_PREFIXES.some((prefix) => name.startsWith(prefix)) &&
-    dot > 0 &&
-    DOC_VIEWER_EXTENSIONS.has(name.slice(dot + 1).toLowerCase())
-  );
-}
-
 const SKIP_DIRS = new Set([".git", "node_modules", ".venv", "venv", "__pycache__", ".next", ".turbo", ".cache", "target", ".gradle", ".idea"]);
 const MAX_ENTRIES = 20_000;
 const MAX_STATUS_ENTRIES = 2_000;
@@ -66,16 +45,12 @@ export interface TurnWindow {
 
 const inWindow = (mtimeMs: number, window: TurnWindow) => mtimeMs >= window.startedAtMs - WINDOW_SLACK_MS && mtimeMs <= window.endedAtMs + WINDOW_SLACK_MS;
 
-/** Pure: which scanned files count as this turn's artifacts, newest first, capped. `covered` ones are only counted. */
-export function selectArtifacts(
-  files: readonly FileStat[],
-  window: TurnWindow,
-  covered: (file: FileStat) => boolean = () => false,
-  limit = MAX_ARTIFACTS,
-): { items: Artifact[]; more: number; covered: number } {
+/** Pure: which scanned files count as this turn's artifacts, newest first, capped. */
+export function selectArtifacts(files: readonly FileStat[], window: TurnWindow, limit = MAX_ARTIFACTS): { items: Artifact[]; more: number } {
   const from = window.startedAtMs - WINDOW_SLACK_MS;
-  const inTurn = files.filter((file) => inWindow(file.mtimeMs, window) && artifactKind(file.path) !== null);
-  const matches = inTurn.filter((file) => !covered(file)).sort((a, b) => b.mtimeMs - a.mtimeMs || a.path.localeCompare(b.path));
+  const matches = files
+    .filter((file) => inWindow(file.mtimeMs, window) && artifactKind(file.path) !== null)
+    .sort((a, b) => b.mtimeMs - a.mtimeMs || a.path.localeCompare(b.path));
   const items = matches.slice(0, limit).map((file) => ({
     path: file.path,
     kind: artifactKind(file.path) ?? "file",
@@ -83,7 +58,7 @@ export function selectArtifacts(
     // birthtime is 0 or unreliable on some filesystems; then everything reads as "changed".
     status: file.birthtimeMs > 0 && file.birthtimeMs >= from ? ("new" as const) : ("changed" as const),
   }));
-  return { items, more: Math.max(0, matches.length - limit), covered: inTurn.length - matches.length };
+  return { items, more: Math.max(0, matches.length - limit) };
 }
 
 export function artifactKind(path: string): string | null {
@@ -169,15 +144,9 @@ export async function changedFiles(root: string, window: TurnWindow): Promise<st
   return kept.filter((path): path is string => path !== null);
 }
 
-/**
- * With a doc viewer card for the turn, documents its scan reaches are left to it. Only files written after this plugin saw
- * the turn start: the viewer judges from its own start, with less slack.
- */
-export async function collectArtifacts(root: string, window: TurnWindow | null, card: DocViewerCard | null = null): Promise<ArtifactsReport> {
+export async function collectArtifacts(root: string, window: TurnWindow | null): Promise<ArtifactsReport> {
   if (!window) return { state: "skipped", items: [], more: 0, note: "turn start not observed (plugin started mid-turn)" };
   const { files, truncated } = await scanFiles(root, window.startedAtMs);
-  const real = await realpath(root).catch(() => root);
-  const inCard = card ? (file: FileStat) => file.mtimeMs >= window.startedAtMs && docViewerLists(relative(card.root, join(real, file.path)).split(sep).join("/")) : undefined;
-  const { items, more, covered } = selectArtifacts(files, window, inCard);
-  return { state: "done", items, more, note: truncated ? `scan stopped after ${MAX_ENTRIES} entries` : null, ...(card ? { docViewer: { ...card, covered } } : {}) };
+  const { items, more } = selectArtifacts(files, window);
+  return { state: "done", items, more, note: truncated ? `scan stopped after ${MAX_ENTRIES} entries` : null };
 }

@@ -20,22 +20,19 @@ function report(id: string, agentId: string, patch: { verify?: Partial<TurnRepor
 
 const conflict = { agentId: "b", agentTitle: "beta", branch: "b", files: [{ path: "math.js", kind: "content" }, { path: "notes.md", kind: "add/add" }], moreFiles: 0 };
 
-describe("documents next to the doc viewer", () => {
+describe("documents chip", () => {
   const pdf = { path: "out/a.pdf", kind: "pdf", size: 1, status: "new" as const };
   const svg = { path: "chart.svg", kind: "image", size: 1, status: "new" as const };
   const withArtifacts = (artifacts: Partial<TurnReport["artifacts"]>) => ({ ...report("r", "a"), artifacts: { state: "done" as const, items: [], more: 0, note: null, ...artifacts } });
-  const card = { pluginId: "paseo-doc-viewer", root: "/r" };
+  const docViewer = { pluginId: "paseo-doc-viewer" };
 
-  it("lists every document of a report with no viewer stamp, as reports before it did", () => {
+  it("counts every document in the chip, with or without the viewer", () => {
     expect(artifactLabel(withArtifacts({ items: [pdf, svg] }))).toBe("2 documents");
-    expect(artifactLabel(withArtifacts({}))).toBe("No documents");
-  });
-
-  it("counts only what the viewer's card leaves out, and hides the chip when it covers all", () => {
-    expect(artifactLabel(withArtifacts({ items: [svg], docViewer: { ...card, covered: 3 } }))).toBe("1 document");
-    expect(artifactLabel(withArtifacts({ docViewer: { ...card, covered: 3 } }))).toBeNull();
-    expect(artifactLabel(withArtifacts({ docViewer: { ...card, covered: 0 } }))).toBe("No documents");
-    expect(artifactLabel(withArtifacts({ state: "pending", docViewer: { ...card, covered: 0 } }))).toBe("Scanning documents");
+    expect(artifactLabel(withArtifacts({ items: [pdf], more: 3, docViewer }))).toBe("4 documents");
+    expect(artifactLabel(withArtifacts({ items: [pdf], docViewer }))).toBe("1 document");
+    expect(artifactLabel(withArtifacts({ docViewer }))).toBe("No documents");
+    expect(artifactLabel(withArtifacts({ state: "pending", docViewer }))).toBe("Scanning documents");
+    expect(artifactLabel(withArtifacts({ state: "skipped" }))).toBe("Documents off");
   });
 });
 

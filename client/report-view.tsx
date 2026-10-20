@@ -83,13 +83,12 @@ function SmallButton({ colors, icon, label, onPress, disabled = false }: { color
 export function ReportChips({ report, colors }: { report: TurnReport; colors: Colors }) {
   const collisionTone: Tone = report.collisions.items.length > 0 ? "danger" : report.collisions.state === "done" ? "success" : "muted";
   const proofChip = report.proof ? proofTone(report.proof) : "muted";
-  const documents = artifactLabel(report);
   return (
     <View style={styles.chips}>
       {report.proof && (proofChip === "danger" || proofChip === "warning") ? <Chip colors={colors} icon={PROOF_ICONS[proofChip]} label={proofLabel(report.proof)} tone={proofChip} /> : null}
       <Chip colors={colors} icon={verifyIcon(report)} label={verifyLabel(report)} tone={verifyTone(report.verify.state)} />
       <Chip colors={colors} icon="GitMerge" label={collisionLabel(report)} tone={collisionTone} />
-      {documents ? <Chip colors={colors} icon="Files" label={documents} tone="muted" /> : null}
+      <Chip colors={colors} icon="Files" label={artifactLabel(report)} tone="muted" />
     </View>
   );
 }

@@ -75,17 +75,14 @@ export const ArtifactSchema = z.object({
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
 
-/** The doc viewer turn card this turn got: `covered` documents are left to it and are not in `items` or `more`. */
-export const DocViewerCardSchema = z.object({ pluginId: z.string(), root: z.string() });
-export type DocViewerCard = z.infer<typeof DocViewerCardSchema>;
-
 export const ArtifactsSchema = z.object({
   state: SectionStateSchema,
   items: z.array(ArtifactSchema),
   more: z.number(),
   note: z.string().nullable(),
-  // Absent on reports from before 0.2 and when the viewer had no card for the turn: every document is listed.
-  docViewer: DocViewerCardSchema.extend({ covered: z.number() }).optional(),
+  // The document viewer plugin was enabled when the turn ended, so the card folds the list into one line. Every document is
+  // in `items` either way. Absent on reports from 0.1.x and when the viewer was off: the list shows in full.
+  docViewer: z.object({ pluginId: z.string() }).optional(),
 });
 export type ArtifactsReport = z.infer<typeof ArtifactsSchema>;
 

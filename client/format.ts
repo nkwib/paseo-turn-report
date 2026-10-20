@@ -66,14 +66,14 @@ export function collisionLabel(report: TurnReport): string {
   return `${files} ${files === 1 ? "file conflicts" : "files conflict"} with ${who}`;
 }
 
-/** Null when every document is on the doc viewer's card: the chip would only repeat it. */
-export function artifactLabel(report: TurnReport): string | null {
+const documentCount = (n: number) => `${n} ${n === 1 ? "document" : "documents"}`;
+
+export function artifactLabel(report: TurnReport): string {
   const a = report.artifacts;
   if (a.state === "pending") return "Scanning documents";
   if (a.state !== "done") return "Documents off";
   const n = a.items.length + a.more;
-  if (n === 0) return a.docViewer?.covered ? null : "No documents";
-  return `${n} ${n === 1 ? "document" : "documents"}`;
+  return n === 0 ? "No documents" : documentCount(n);
 }
 
 export function formatDuration(ms: number): string {

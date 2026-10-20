@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, realpath, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { ARTIFACT_KINDS, artifactKind, collectArtifacts, DOC_VIEWER_EXTENSIONS, docViewerLists, selectArtifacts, type FileStat } from "../server/artifacts";
+import { ARTIFACT_KINDS, artifactKind, collectArtifacts, selectArtifacts, type FileStat } from "../server/artifacts";
 
 // The doc viewer's kinds.ts, when a checkout is at hand: DOC_VIEWER_SOURCE, or ../paseo-doc-viewer next to this one.
 const DOC_VIEWER_KINDS = [process.env.DOC_VIEWER_SOURCE ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../paseo-doc-viewer")]
@@ -36,7 +36,7 @@ describe("selectArtifacts", () => {
 
   it("caps the list and reports the rest", () => {
     const many = Array.from({ length: 15 }, (_, i) => file(`f${i}.jsonl`, i * 1000));
-    const { items, more } = selectArtifacts(many, window, undefined, 12);
+    const { items, more } = selectArtifacts(many, window, 12);
     expect(items).toHaveLength(12);
     expect(more).toBe(3);
     expect(items[0].path).toBe("f14.jsonl");
@@ -55,7 +55,6 @@ describe("selectArtifacts", () => {
 
   it("lists what the doc viewer opens (0.5.2 shared/kinds.ts), plus SVG and notebooks", () => {
     const docViewer = ["pdf", "docx", "xlsx", "csv", "tsv", "jsonl", "ndjson", "parquet", "pptx", "mp4", "m4v", "mov", "webm", "mp3", "m4a", "wav", "flac", "png", "jpg", "jpeg", "gif", "tif", "tiff", "heic", "heif", "webp"];
-    expect([...DOC_VIEWER_EXTENSIONS].sort()).toEqual(docViewer.sort());
     expect(Object.keys(ARTIFACT_KINDS).sort()).toEqual([...docViewer, "svg", "ipynb"].sort());
     expect([artifactKind("runs.tsv"), artifactKind("log.ndjson"), artifactKind("t.parquet"), artifactKind("demo.MOV"), artifactKind("a.flac"), artifactKind("p.HEIC")]).toEqual(["csv", "jsonl", "parquet", "video", "audio", "image"]);
   });
@@ -63,41 +62,7 @@ describe("selectArtifacts", () => {
   it.skipIf(!DOC_VIEWER_KINDS)("matches the doc viewer checkout's kinds.ts", async () => {
     const { DOCUMENT_KINDS, KIND_REGISTRY } = await import(DOC_VIEWER_KINDS!);
     const extensions = (DOCUMENT_KINDS as string[]).flatMap((kind) => KIND_REGISTRY[kind].extensions as string[]);
-    expect([...DOC_VIEWER_EXTENSIONS].sort()).toEqual(extensions.sort());
-  });
-
-  it("counts covered documents apart and caps only the rest", () => {
-    const many = Array.from({ length: 14 }, (_, i) => file(`f${i}.pdf`, i * 1000));
-    const { items, more, covered } = selectArtifacts([...many, file("chart.svg", 0)], window, (f) => f.path.endsWith(".pdf"));
-    expect(items.map((i) => i.path)).toEqual(["chart.svg"]);
-    expect([more, covered]).toEqual([0, 14]);
-  });
-});
-
-describe("docViewerLists", () => {
-  it("covers the types the viewer opens, wherever its scan reaches", () => {
-    for (const path of ["report.pdf", "out/Deck.PPTX", "a/b/c/data.tsv", "~notes.pdf", ".hidden.pdf", `${"d/".repeat(16)}deep.pdf`]) expect(docViewerLists(path)).toBe(true);
-  });
-
-  it("leaves SVG, notebooks and what the viewer's scan skips to this card", () => {
-    for (const path of [
-      "chart.svg",
-      "nb.ipynb",
-      ".hidden/x.pdf",
-      "docs/.cache/x.pdf",
-      "vendor/y.pdf",
-      "a/node_modules/x.pdf",
-      "target/x.pdf",
-      "venv/x.pdf",
-      "~$draft.docx",
-      "._report.pdf",
-      `${"d/".repeat(17)}deep.pdf`,
-      "../outside.pdf",
-      "/abs/x.pdf",
-      ".pdf",
-      "README",
-    ])
-      expect(docViewerLists(path), path).toBe(false);
+    expect(Object.keys(ARTIFACT_KINDS).filter((extension) => extension !== "svg" && extension !== "ipynb").sort()).toEqual(extensions.sort());
   });
 });
 
@@ -118,26 +83,6 @@ describe("collectArtifacts", () => {
     const report = await collectArtifacts(root, { startedAtMs: started, endedAtMs: Date.now() });
     expect(report.items.map((i) => i.path)).toEqual(["out/report.pdf"]);
     expect(report.state).toBe("done");
-  });
-
-  it("leaves to the viewer card the documents its scan reaches inside its workspace, written since the turn start", async () => {
-    const parent = await realpath(await mkdtemp(join(tmpdir(), "tr-art-")));
-    onTestFinished(() => rm(parent, { recursive: true, force: true }));
-    const root = join(parent, "repo");
-    await mkdir(join(root, "app/.hidden"), { recursive: true });
-    await mkdir(join(root, "app/vendor"), { recursive: true });
-    await mkdir(join(root, "other"), { recursive: true });
-    // Set mtimes: Linux stamps files from a per-tick clock, so a file written right after Date.now() can read as older.
-    const window = { startedAtMs: T0, endedAtMs: T0 + 60_000 };
-    const mtimes: Record<string, number> = { "app/a.pdf": 0, "app/chart.svg": 1_000, "app/.hidden/x.pdf": 1_000, "app/vendor/y.pdf": 1_000, "other/b.pdf": 1_000, "app/early.pdf": -1_000 };
-    for (const [path, offset] of Object.entries(mtimes)) {
-      await writeFile(join(root, path), "x");
-      await utimes(join(root, path), new Date(T0 + offset), new Date(T0 + offset));
-    }
-    const report = await collectArtifacts(root, window, { pluginId: "paseo-doc-viewer", root: join(root, "app") });
-    expect(report.items.map((i) => i.path).sort()).toEqual(["app/.hidden/x.pdf", "app/chart.svg", "app/early.pdf", "app/vendor/y.pdf", "other/b.pdf"]);
-    expect(report.docViewer).toEqual({ pluginId: "paseo-doc-viewer", root: join(root, "app"), covered: 1 });
-    expect((await collectArtifacts(root, window)).docViewer).toBeUndefined();
   });
 
   it("skips when the turn start was not observed", async () => {

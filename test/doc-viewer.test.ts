@@ -1,14 +1,16 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { DEFAULT_SETTINGS, type TurnReport } from "../shared/report";
-import { createDocViewerProbe, enabledInConfig, paseoHome, turnCardsOn } from "../server/doc-viewer";
+import { DEFAULT_SETTINGS, type TurnReport, type TurnReportSettings } from "../shared/report";
+import { enabledInConfig } from "../server/doc-viewer";
 import { createReportService } from "../server/service";
 import type { PaseoApi } from "../server/host-types";
 
 const ID = "paseo-doc-viewer";
 const viewer = { source: "directory" as const, path: "/plugins/doc-viewer" };
+
+type Config = { pluginsEnabled?: boolean; plugins?: Record<string, { enabled?: boolean; source: "directory"; path: string }> };
 
 async function tempDir() {
   const dir = await realpath(await mkdtemp(join(tmpdir(), "tr-dv-")));
@@ -16,26 +18,16 @@ async function tempDir() {
   return dir;
 }
 
-/** A daemon home with config.json and, unless null, the viewer's stored settings. */
-async function home(values: unknown, version = 1) {
-  const dir = await tempDir();
-  await writeFile(join(dir, "config.json"), "{}");
-  if (values !== null) {
-    await mkdir(join(dir, "plugin-settings", ID), { recursive: true });
-    await writeFile(join(dir, "plugin-settings", ID, "viewer.json"), typeof values === "string" ? values : JSON.stringify({ version, values }));
-  }
-  return dir;
-}
-
-function fakePaseo(config: { pluginsEnabled?: boolean; plugins?: Record<string, { enabled?: boolean; source: "directory"; path: string }> }, workspaces: Record<string, string>) {
+function fakePaseo(config: Config | Error) {
   const appended: TurnReport[] = [];
   const paseo = {
-    config: { get: async () => ({ requestId: "r", config }) },
-    workspaces: { list: async () => ({ entries: Object.entries(workspaces).map(([id, workspaceDirectory]) => ({ id, workspaceDirectory })) }) },
-    agents: {
-      list: async () => ({ entries: [] }),
-      ref: () => ({ timeline: { append: async (item: { data: TurnReport }) => void appended.push(item.data) } }),
+    config: {
+      get: async () => {
+        if (config instanceof Error) throw config;
+        return { requestId: "r", config };
+      },
     },
+    agents: { ref: () => ({ timeline: { append: async (item: { data: TurnReport }) => void appended.push(item.data) } }) },
   } as unknown as PaseoApi;
   return { paseo, appended };
 }
@@ -50,83 +42,112 @@ describe("doc viewer state", () => {
     expect(enabledInConfig({ pluginsEnabled: true, plugins: {} }, ID)).toBe(false);
     expect(enabledInConfig({ pluginsEnabled: true, plugins: { [ID]: viewer } }, "")).toBe(false);
   });
-
-  it("resolves the daemon home like the daemon", () => {
-    expect(paseoHome({}, "/u")).toBe("/u/.paseo");
-    expect(paseoHome({ PASEO_HOME: "~/p" }, "/u")).toBe("/u/p");
-    expect(paseoHome({ PASEO_HOME: "/srv/paseo" }, "/u")).toBe("/srv/paseo");
-  });
-
-  it("reads turn cards as on only when the stored setting says so or the viewer has none yet", async () => {
-    expect(await turnCardsOn(ID, await home(null))).toBe(true);
-    expect(await turnCardsOn(ID, await home({ kindColors: false }))).toBe(true);
-    expect(await turnCardsOn(ID, await home({ turnCards: true }))).toBe(true);
-    expect(await turnCardsOn(ID, await home({ turnCards: false }))).toBe(false);
-    expect(await turnCardsOn(ID, await home({ turnCards: true }, 2))).toBe(false);
-    expect(await turnCardsOn(ID, await home({ turnCards: "yes" }))).toBe(false);
-    expect(await turnCardsOn(ID, await home("{not json"))).toBe(false);
-    // No config.json: not the daemon's home, so a missing settings file proves nothing.
-    expect(await turnCardsOn(ID, await tempDir())).toBe(false);
-  });
-
-  it("finds a card only with the viewer enabled, a workspace and turn cards on", async () => {
-    const dir = await tempDir();
-    const on = { pluginsEnabled: true, plugins: { [ID]: viewer } };
-    const probe = createDocViewerProbe(await home(null));
-    const { paseo } = fakePaseo(on, { w: dir });
-    expect(await probe.turnStarted(paseo, ID, "w")).toEqual({ pluginId: ID, root: dir });
-    expect(await probe.turnStarted(paseo, ID, null)).toBeNull();
-    expect(await probe.turnStarted(paseo, ID, "missing")).toBeNull();
-    expect(await probe.turnStarted(paseo, "", "w")).toBeNull();
-    expect(await probe.turnStarted(fakePaseo({ ...on, pluginsEnabled: false }, { w: dir }).paseo, ID, "w")).toBeNull();
-    expect(await probe.turnEnded(paseo, { pluginId: ID, root: dir })).toBe(true);
-    expect(await createDocViewerProbe(await home({ turnCards: false })).turnEnded(paseo, { pluginId: ID, root: dir })).toBe(false);
-  });
 });
 
-describe("documents stamped at turn end", () => {
-  const settings = async () => ({ ...DEFAULT_SETTINGS, verify: false, collisions: false });
+describe("documents and the viewer stamp", () => {
+  const baseSettings = { ...DEFAULT_SETTINGS, verify: false, collisions: false };
   const hookAgent = (cwd: string) => ({ id: "A", cwd, title: "A", workspaceId: "w", parentAgentId: null, provider: "mock" });
+  const on: Config = { pluginsEnabled: true, plugins: { [ID]: viewer } };
+  const everyDocument = [".hidden/x.pdf", "chart.svg", "report.pdf", "vendor/y.pdf"];
+  const listed = (report: TurnReport) => report.artifacts.items.map((i) => i.path).sort();
 
-  async function turn(daemonHome: string, config: Parameters<typeof fakePaseo>[0]) {
+  async function turn(
+    config: Config | Error,
+    { before, beforeEnd, settings = {} }: { before?: (root: string) => Promise<void>; beforeEnd?: (root: string) => Promise<void>; settings?: Partial<TurnReportSettings> } = {},
+  ) {
     const root = await tempDir();
     await mkdir(join(root, ".hidden"));
     await mkdir(join(root, "vendor"));
-    const { paseo, appended } = fakePaseo(config, { w: root });
-    const service = createReportService(settings, undefined, undefined, createDocViewerProbe(daemonHome));
-    service.turnStarted(hookAgent(root), "t1", paseo);
+    await before?.(root);
+    const { paseo, appended } = fakePaseo(config);
+    const service = createReportService(async () => ({ ...baseSettings, ...settings }));
+    service.turnStarted(hookAgent(root), "t1");
     await new Promise((r) => setTimeout(r, 20));
     for (const path of ["report.pdf", "chart.svg", ".hidden/x.pdf", "vendor/y.pdf"]) await writeFile(join(root, path), "x");
+    await beforeEnd?.(root);
     service.turnEnded({ agent: hookAgent(root), turnId: "t1", outcome: { kind: "completed" } }, paseo);
     await service.idle();
     return { root, service, paseo, report: appended.at(-1)! };
   }
 
-  const on = { pluginsEnabled: true, plugins: { [ID]: viewer } };
+  async function manyFiles(dir: string, count: number) {
+    await mkdir(dir);
+    for (let i = 0; i < count; i += 250) await Promise.all(Array.from({ length: Math.min(250, count - i) }, (_, j) => writeFile(join(dir, `f${i + j}.txt`), "")));
+  }
 
-  it("leaves the viewer's documents to its card and lists the rest", async () => {
-    const { root, report } = await turn(await home(null), on);
-    expect(report.artifacts.items.map((i) => i.path).sort()).toEqual([".hidden/x.pdf", "chart.svg", "vendor/y.pdf"]);
-    expect(report.artifacts.docViewer).toEqual({ pluginId: ID, root, covered: 1 });
+  it("lists every document and stamps the report while the viewer is enabled", async () => {
+    const { report } = await turn(on);
+    expect(listed(report)).toEqual(everyDocument);
+    expect(report.artifacts.docViewer).toEqual({ pluginId: ID });
   });
 
-  it("lists everything when the viewer's turn cards are off or it is disabled", async () => {
-    for (const [daemonHome, config] of [
-      [await home({ turnCards: false }), on],
-      [await home(null), { ...on, plugins: { [ID]: { ...viewer, enabled: false } } }],
+  it("lists every document with no stamp when the viewer is off, disabled, absent or its id is empty", async () => {
+    for (const [config, settings] of [
+      [{ pluginsEnabled: true, plugins: { [ID]: { ...viewer, enabled: false } } }, {}],
+      [{ ...on, pluginsEnabled: false }, {}],
+      [{ plugins: on.plugins }, {}],
+      [{ pluginsEnabled: true, plugins: {} }, {}],
+      [on, { openWithPluginId: "" }],
     ] as const) {
-      const { report } = await turn(daemonHome, config);
-      expect(report.artifacts.items).toHaveLength(4);
+      const { report } = await turn(config, { settings });
+      expect(listed(report)).toEqual(everyDocument);
       expect(report.artifacts.docViewer).toBeUndefined();
     }
   });
 
-  it("keeps the turn's decision on Re-run", async () => {
-    const { service, paseo, report } = await turn(await home(null), on);
+  it("lists every document with no stamp when the config cannot be read", async () => {
+    const { report } = await turn(new Error("host not ready"));
+    expect(listed(report)).toEqual(everyDocument);
+    expect(report.artifacts.docViewer).toBeUndefined();
+  });
+
+  it("lists every document for a viewer with no turn card, as 0.3 and 0.4 have", async () => {
+    const { report } = await turn(on);
+    expect(listed(report)).toEqual(everyDocument);
+  });
+
+  it("lists documents in a folder past the viewer's scan limit", async () => {
+    const { report } = await turn(on, {
+      before: (root) => manyFiles(join(root, "big"), 5_001),
+      beforeEnd: (root) => writeFile(join(root, "big/final.pdf"), "x"),
+    });
+    expect(listed(report)).toEqual([...everyDocument, "big/final.pdf"].sort());
+  });
+
+  it("keeps every document in the stored report when the viewer is disabled later", async () => {
+    const config = structuredClone(on);
+    const { service, paseo, report } = await turn(config);
+    expect(listed(report)).toEqual(everyDocument);
+    config.plugins![ID] = { ...viewer, enabled: false };
     service.rerun(report.id, paseo);
     await service.idle();
     const rerun = service.recent(null, 1)[0];
-    expect(rerun.artifacts.items.map((i) => i.path).sort()).toEqual([".hidden/x.pdf", "chart.svg", "vendor/y.pdf"]);
-    expect(rerun.artifacts.docViewer?.covered).toBe(1);
+    expect(listed(rerun)).toEqual(everyDocument);
+    expect(rerun.artifacts.docViewer).toEqual({ pluginId: ID });
+  });
+
+  it("lists a document written just after the turn ends", async () => {
+    const { report } = await turn(on, {
+      beforeEnd: async (root) => {
+        const later = new Date(Date.now() + 600);
+        await writeFile(join(root, "late.pdf"), "x");
+        await utimes(join(root, "late.pdf"), later, later);
+      },
+    });
+    expect(listed(report)).toEqual([...everyDocument, "late.pdf"].sort());
+  });
+
+  it("keeps the turn's answer on Re-run, also after a restart, whatever the viewer is now", async () => {
+    const disabled = { pluginsEnabled: true, plugins: { [ID]: { ...viewer, enabled: false } } };
+    const stamped = await turn(on);
+    const unstamped = await turn({ pluginsEnabled: true, plugins: {} });
+    for (const [stored, now, docViewer] of [[stamped.report, disabled, { pluginId: ID }], [unstamped.report, on, undefined]] as const) {
+      const { paseo, appended } = fakePaseo(now);
+      const restarted = createReportService(async () => baseSettings, { initial: [stored], save: () => {} });
+      restarted.rerun(stored.id, paseo);
+      await restarted.idle();
+      expect(listed(appended.at(-1)!)).toEqual(everyDocument);
+      expect(appended.at(-1)!.artifacts.docViewer).toEqual(docViewer);
+    }
   });
 });
