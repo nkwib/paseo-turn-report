@@ -4,8 +4,8 @@
 
 ### Changed
 
-- While the PDF and Office viewer is enabled, the card and the board show no documents chip or list: the viewer's card owns them. Both stay hidden until the plugin knows whether the viewer is enabled, so no count flashes. Without the viewer, the list is unchanged.
-- Open is gone from the board. It sent paths relative to the repository root to a viewer that resolves them against the workspace directory, so a workspace inside a repository opened "File not found". The "Open documents with plugin" setting is now "Document viewer plugin".
+- Documents the PDF and Office viewer's card lists for a turn are left to it; the card and the board list the rest (SVG, notebooks, and files the viewer's scan skips). The plugin decides when the turn ends, from the viewer's state then and its "Turn cards" setting, and stores the result with the report. Older reports and turns the viewer had no card for list every document. The chip is hidden when the viewer covers all of them.
+- Open is gone from the board. It sent paths relative to the repository root to a viewer that resolves them against the workspace directory, so a workspace inside a repository opened "File not found". The "Open documents with plugin" setting is now "Document viewer plugin" and keeps its stored value.
 
 ### Fixed
 
