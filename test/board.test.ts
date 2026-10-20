@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approvalPrompt, boardSummary, checkProvenance, claimLine, footerSummary, checkRan, collisionLabel, docViewerEnabled, latestPerAgent, overallTone, proofFacts, showsDocuments, verifyLabel } from "../client/format";
+import { approvalPrompt, artifactLabel, boardSummary, checkProvenance, claimLine, footerSummary, checkRan, collisionLabel, latestPerAgent, overallTone, proofFacts, verifyLabel } from "../client/format";
 import { CHECK_ALREADY_RUNNING, NOT_A_GIT_REPOSITORY, type TurnReport, type Verdict } from "../shared/report";
 
 function report(id: string, agentId: string, patch: { verify?: Partial<TurnReport["verify"]>; collisions?: Partial<TurnReport["collisions"]>; verdicts?: Verdict[] } = {}): TurnReport {
@@ -21,20 +21,21 @@ function report(id: string, agentId: string, patch: { verify?: Partial<TurnRepor
 const conflict = { agentId: "b", agentTitle: "beta", branch: "b", files: [{ path: "math.js", kind: "content" }, { path: "notes.md", kind: "add/add" }], moreFiles: 0 };
 
 describe("documents next to the doc viewer", () => {
-  it("leaves the file list to the doc viewer only when its plugin is configured and enabled", () => {
-    const viewer = { source: "directory" as const, path: "/plugins/doc-viewer" };
-    const id = "paseo-doc-viewer";
-    expect(docViewerEnabled({ pluginsEnabled: true, plugins: { [id]: viewer } }, id)).toBe(true);
-    expect(docViewerEnabled({ pluginsEnabled: true, plugins: { [id]: { ...viewer, enabled: false } } }, id)).toBe(false);
-    expect(docViewerEnabled({ pluginsEnabled: false, plugins: { [id]: viewer } }, id)).toBe(false);
-    expect(docViewerEnabled({ pluginsEnabled: true, plugins: {} }, id)).toBe(false);
-    expect(docViewerEnabled({ pluginsEnabled: true, plugins: { [id]: viewer } }, "")).toBe(false);
+  const pdf = { path: "out/a.pdf", kind: "pdf", size: 1, status: "new" as const };
+  const svg = { path: "chart.svg", kind: "image", size: 1, status: "new" as const };
+  const withArtifacts = (artifacts: Partial<TurnReport["artifacts"]>) => ({ ...report("r", "a"), artifacts: { state: "done" as const, items: [], more: 0, note: null, ...artifacts } });
+  const card = { pluginId: "paseo-doc-viewer", root: "/r" };
+
+  it("lists every document of a report with no viewer stamp, as reports before it did", () => {
+    expect(artifactLabel(withArtifacts({ items: [pdf, svg] }))).toBe("2 documents");
+    expect(artifactLabel(withArtifacts({}))).toBe("No documents");
   });
 
-  it("shows documents only once the doc viewer is known to be off", () => {
-    expect(showsDocuments("off")).toBe(true);
-    expect(showsDocuments("on")).toBe(false);
-    expect(showsDocuments("unknown")).toBe(false);
+  it("counts only what the viewer's card leaves out, and hides the chip when it covers all", () => {
+    expect(artifactLabel(withArtifacts({ items: [svg], docViewer: { ...card, covered: 3 } }))).toBe("1 document");
+    expect(artifactLabel(withArtifacts({ docViewer: { ...card, covered: 3 } }))).toBeNull();
+    expect(artifactLabel(withArtifacts({ docViewer: { ...card, covered: 0 } }))).toBe("No documents");
+    expect(artifactLabel(withArtifacts({ state: "pending", docViewer: { ...card, covered: 0 } }))).toBe("Scanning documents");
   });
 });
 

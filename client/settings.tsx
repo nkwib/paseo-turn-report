@@ -39,13 +39,13 @@ export function SettingsScreen({ theme }: PluginSurfaceProps) {
           <SettingsSwitch label="Check conflicts with other live agents" value={values.collisions} onValueChange={(collisions) => save({ collisions })} />
           <SettingsSwitch
             label="List documents changed during the turn"
-            hint="While the document viewer plugin is enabled, its card lists them instead."
+            hint="Documents the document viewer plugin's turn card lists are left to it."
             value={values.artifacts}
             onValueChange={(artifacts) => save({ artifacts })}
           />
           <SettingsInput
             label="Document viewer plugin"
-            hint="Plugin id. Empty: always list documents here."
+            hint="Plugin id. Empty: list every document here."
             initialValue={values.openWithPluginId}
             onChangeText={(openWithPluginId) => save({ openWithPluginId: openWithPluginId.trim() })}
           />

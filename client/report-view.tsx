@@ -80,20 +80,21 @@ function SmallButton({ colors, icon, label, onPress, disabled = false }: { color
 }
 
 /** One-line glance: check, collisions, documents. */
-export function ReportChips({ report, colors, showDocuments }: { report: TurnReport; colors: Colors; showDocuments: boolean }) {
+export function ReportChips({ report, colors }: { report: TurnReport; colors: Colors }) {
   const collisionTone: Tone = report.collisions.items.length > 0 ? "danger" : report.collisions.state === "done" ? "success" : "muted";
   const proofChip = report.proof ? proofTone(report.proof) : "muted";
+  const documents = artifactLabel(report);
   return (
     <View style={styles.chips}>
       {report.proof && (proofChip === "danger" || proofChip === "warning") ? <Chip colors={colors} icon={PROOF_ICONS[proofChip]} label={proofLabel(report.proof)} tone={proofChip} /> : null}
       <Chip colors={colors} icon={verifyIcon(report)} label={verifyLabel(report)} tone={verifyTone(report.verify.state)} />
       <Chip colors={colors} icon="GitMerge" label={collisionLabel(report)} tone={collisionTone} />
-      {showDocuments ? <Chip colors={colors} icon="Files" label={artifactLabel(report)} tone="muted" /> : null}
+      {documents ? <Chip colors={colors} icon="Files" label={documents} tone="muted" /> : null}
     </View>
   );
 }
 
-export function ReportBody({ report, colors, actions, compact, showDocuments }: { report: TurnReport; colors: Colors; actions: ReportActions; compact: boolean; showDocuments: boolean }) {
+export function ReportBody({ report, colors, actions, compact }: { report: TurnReport; colors: Colors; actions: ReportActions; compact: boolean }) {
   const toast = useToast();
   const v = report.verify;
   const failed = v.state === "failed" || v.state === "gave_up" || v.state === "retrying" || v.state === "busy";
@@ -187,7 +188,7 @@ export function ReportBody({ report, colors, actions, compact, showDocuments }: 
       ))}
       {report.collisions.note && report.collisions.state === "error" ? <Text style={[styles.meta, { color: colors.statusDanger }]}>{report.collisions.note}</Text> : null}
 
-      {(showDocuments ? report.artifacts.items : []).map((artifact) => (
+      {report.artifacts.items.map((artifact) => (
         <View key={artifact.path} style={styles.fileRow}>
           <Icon name={ARTIFACT_ICONS[artifact.kind] ?? "File"} size={14} color={colors.foregroundMuted} />
           <View style={styles.flex}>
@@ -203,7 +204,7 @@ export function ReportBody({ report, colors, actions, compact, showDocuments }: 
           </Pressable>
         </View>
       ))}
-      {showDocuments && report.artifacts.more > 0 ? <Text style={[styles.meta, muted]}>+{report.artifacts.more} more documents</Text> : null}
+      {report.artifacts.more > 0 ? <Text style={[styles.meta, muted]}>+{report.artifacts.more} more documents</Text> : null}
     </View>
   );
 }

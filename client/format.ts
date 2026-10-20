@@ -1,10 +1,6 @@
-import type { PluginClientContext } from "@getpaseo/plugin/client";
 import type { ClaimVerdict, Outcome, ProofReport, TurnReport, Verdict, VerifyReport, VerifyState } from "../shared/report";
 import { CHECK_ALREADY_RUNNING, escapeHidden, hasHiddenCharacters, NOT_A_GIT_REPOSITORY } from "../shared/report";
 import { commandResult } from "../shared/command-kind";
-
-// From the SDK, not @getpaseo/protocol: a Git install has no node_modules to resolve it from.
-type MutableDaemonConfig = Awaited<ReturnType<PluginClientContext["paseo"]["config"]["get"]>>["config"];
 
 export type Tone = "success" | "danger" | "warning" | "muted";
 
@@ -70,12 +66,14 @@ export function collisionLabel(report: TurnReport): string {
   return `${files} ${files === 1 ? "file conflicts" : "files conflict"} with ${who}`;
 }
 
-export function artifactLabel(report: TurnReport): string {
+/** Null when every document is on the doc viewer's card: the chip would only repeat it. */
+export function artifactLabel(report: TurnReport): string | null {
   const a = report.artifacts;
   if (a.state === "pending") return "Scanning documents";
   if (a.state !== "done") return "Documents off";
   const n = a.items.length + a.more;
-  return n === 0 ? "No documents" : `${n} ${n === 1 ? "document" : "documents"}`;
+  if (n === 0) return a.docViewer?.covered ? null : "No documents";
+  return `${n} ${n === 1 ? "document" : "documents"}`;
 }
 
 export function formatDuration(ms: number): string {
@@ -119,18 +117,6 @@ export const ARTIFACT_ICONS: Readonly<Record<string, string>> = {
   jsonl: "FileJson",
   ipynb: "NotebookPen",
 };
-
-/**
- * A plugin can read the daemon's configured plugins, not which ones are running.
- */
-export function docViewerEnabled(config: Pick<MutableDaemonConfig, "pluginsEnabled" | "plugins">, pluginId: string): boolean {
-  const entry = config.plugins?.[pluginId];
-  return config.pluginsEnabled === true && entry !== undefined && entry.enabled !== false;
-}
-
-export type DocViewerState = "unknown" | "on" | "off";
-
-export const showsDocuments = (docViewer: DocViewerState) => docViewer === "off";
 
 /**
  * One status per report for the board, the worst of check, collisions and proof: red = check failed or a claim
