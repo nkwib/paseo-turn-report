@@ -127,14 +127,17 @@ describe("collectArtifacts", () => {
     await mkdir(join(root, "app/.hidden"), { recursive: true });
     await mkdir(join(root, "app/vendor"), { recursive: true });
     await mkdir(join(root, "other"), { recursive: true });
-    const started = Date.now();
-    for (const path of ["app/a.pdf", "app/chart.svg", "app/.hidden/x.pdf", "app/vendor/y.pdf", "other/b.pdf", "app/early.pdf"]) await writeFile(join(root, path), "x");
-    const early = new Date(started - 1_000);
-    await utimes(join(root, "app/early.pdf"), early, early);
-    const report = await collectArtifacts(root, { startedAtMs: started, endedAtMs: Date.now() + 10 }, { pluginId: "paseo-doc-viewer", root: join(root, "app") });
+    // Set mtimes: Linux stamps files from a per-tick clock, so a file written right after Date.now() can read as older.
+    const window = { startedAtMs: T0, endedAtMs: T0 + 60_000 };
+    const mtimes: Record<string, number> = { "app/a.pdf": 0, "app/chart.svg": 1_000, "app/.hidden/x.pdf": 1_000, "app/vendor/y.pdf": 1_000, "other/b.pdf": 1_000, "app/early.pdf": -1_000 };
+    for (const [path, offset] of Object.entries(mtimes)) {
+      await writeFile(join(root, path), "x");
+      await utimes(join(root, path), new Date(T0 + offset), new Date(T0 + offset));
+    }
+    const report = await collectArtifacts(root, window, { pluginId: "paseo-doc-viewer", root: join(root, "app") });
     expect(report.items.map((i) => i.path).sort()).toEqual(["app/.hidden/x.pdf", "app/chart.svg", "app/early.pdf", "app/vendor/y.pdf", "other/b.pdf"]);
     expect(report.docViewer).toEqual({ pluginId: "paseo-doc-viewer", root: join(root, "app"), covered: 1 });
-    expect((await collectArtifacts(root, { startedAtMs: started, endedAtMs: Date.now() + 10 })).docViewer).toBeUndefined();
+    expect((await collectArtifacts(root, window)).docViewer).toBeUndefined();
   });
 
   it("skips when the turn start was not observed", async () => {
