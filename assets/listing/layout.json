@@ -33,6 +33,20 @@
       "caption": "Latest reports from four agents. Colours reflect the check, proof and conflicts."
     },
     {
+      "output": "documents-hd.png",
+      "source": "screenshot-documents.png",
+      "crop": [
+        480,
+        145,
+        1520,
+        840
+      ],
+      "title": "Works with the\nPDF and Office\nviewer.",
+      "body": "Each report counts the documents\nthe turn changed. The viewer's\ncard above it opens them.",
+      "detail": "Folded to one line while\nthe viewer plugin is on",
+      "caption": "Real turn: the project check passed and four documents changed. The full list is one click away."
+    },
+    {
       "output": "approval-hd.png",
       "source": "screenshot-approval.png",
       "crop": [
