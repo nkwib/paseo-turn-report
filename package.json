@@ -1,6 +1,6 @@
 {
   "name": "paseo-turn-report",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Run your project check after each turn, compare claims with command evidence and review results and worktree conflicts in one board.",
