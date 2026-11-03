@@ -290,7 +290,9 @@ export function createReportService(
       const start = turnStarts.get(event.agent.id) ?? null;
       turnStarts.delete(event.agent.id);
       const previousEnd = turnEnds.get(event.agent.id) ?? null;
-      if (event.timeline) turnEnds.set(event.agent.id, event.timeline.length);
+      // Paseo 0.15 deliberately supplies [] rather than the full conversation here.
+      // Never record that empty payload as an actual timeline position.
+      if (event.timeline?.length) turnEnds.set(event.agent.id, event.timeline.length);
       if (event.outcome.kind === "canceled") {
         step(event.agent.id, { type: "turn_canceled" }, 0);
         log(`skip ${event.agent.id.slice(0, 8)}: turn canceled`);
@@ -305,9 +307,33 @@ export function createReportService(
       // Turn ids are numbered per agent session ("foreground-turn-1", "codex-turn-0"), so they repeat across agents
       // and after a daemon restart; the agent id and start time keep each turn's report and chat row apart.
       const reportId = `turn-report:${event.agent.id}:${event.turnId ?? start?.turnId ?? "turn"}:${startedAtMs ?? Date.now()}`;
-      const turn = event.timeline ? sliceTurn(event.timeline, previousEnd) : null;
       const kind = retry.get(event.agent.id)?.kind === "in_followup" ? "plugin_followup" : "turn";
-      track(buildReport({ kind, event, reportId, startedAtMs, turn }, paseo).catch((error) => log(`report failed: ${String(error)}`)));
+      // Paseo 0.15 omits the history from turn-ended hooks. Fetch recent projected
+      // items through the SDK instead of classifying a real file edit as chat-only.
+      const work = (async () => {
+        let timeline = event.timeline;
+        let startIndex = previousEnd;
+        if (timeline?.length === 0) {
+          try {
+            const page = await paseo.agents.ref(event.agent.id).timeline.refetch({
+              direction: "tail",
+              limit: 200,
+              projection: "projected",
+            });
+            timeline = page.entries.map(({ item }) => item);
+            // Tail pages are not necessarily the entire conversation; use the
+            // last user message rather than an index from an older full timeline.
+            startIndex = null;
+          } catch (error) {
+            log(`timeline refetch failed for ${event.agent.id.slice(0, 8)}: ${String(error).slice(0, 200)}`);
+            timeline = [];
+          }
+        }
+        const hydrated = { ...event, timeline };
+        const turn = timeline ? sliceTurn(timeline, startIndex) : null;
+        await buildReport({ kind, event: hydrated, reportId, startedAtMs, turn }, paseo);
+      })();
+      track(work.catch((error) => log(`report failed: ${String(error)}`)));
     },
     recent(workspaceId, limit) {
       const out: TurnReport[] = [];
