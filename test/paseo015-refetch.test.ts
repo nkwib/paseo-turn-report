@@ -37,7 +37,7 @@ async function paseo015(refetch: Refetch) {
     await service.idle();
   };
   const write = (name: string): AgentTimelineItem => ({ type: "tool_call", callId: name, name: "write", status: "completed", error: null, detail: { type: "write", filePath: join(cwd, name) } });
-  return { cwd, service, calls, published, runTurn, write };
+  return { cwd, agent, paseo, service, calls, published, runTurn, write };
 }
 
 const row = (item: AgentTimelineItem, at = Date.now(), turnId?: string): FetchedTimelineEntry => ({ item, timestamp: new Date(at).toISOString(), ...(turnId ? { turnId } : {}) });
@@ -83,6 +83,24 @@ describe("Paseo 0.15 turn hooks without a timeline", () => {
     const before = Date.now() - 1000;
     await t.runTurn("dsh-turn-1", () => rows.push(row(ask("write a"), before, "dsh-turn-1"), row(t.write("a.md"), before + 1, "dsh-turn-1")));
     expect(names(t.service.recent(null, 1)[0])).toEqual(["a.md"]);
+  });
+
+  it("a nested turn that starts during a foreground turn leaves the foreground turn its own window", async () => {
+    const rows: FetchedTimelineEntry[] = [];
+    const t = await paseo015(async () => ({ entries: rows }));
+    const end = (turnId: string) => t.service.turnEnded({ agent: t.agent, turnId, outcome: { kind: "completed" }, timeline: [] }, t.paseo);
+    rows.push(row(ask("write a"), Date.now() - 5000), row(t.write("c.md"), Date.now() - 4000));
+    t.service.turnStarted(t.agent, "foreground-turn-1");
+    rows.push(row(t.write("a.md"), Date.now(), "foreground-turn-1"));
+    t.service.turnStarted(t.agent, "auto-turn-1");
+    rows.push(row(t.write("b.md"), Date.now(), "auto-turn-1"));
+    end("auto-turn-1");
+    await t.service.idle();
+    end("foreground-turn-1");
+    await t.service.idle();
+    const [foreground, nested] = t.service.recent(null, 2);
+    expect(names(nested)).toEqual(["b.md"]);
+    expect(names(foreground)).toEqual(["a.md"]);
   });
 
   it("pages back until it reaches the start of a turn longer than one page", async () => {

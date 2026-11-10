@@ -140,7 +140,8 @@ export function createReportService(
   persistence: ReportPersistence = { initial: [], save: () => {} },
   approvals: CheckApprovals = createCheckApprovals(null),
 ): ReportService {
-  const turnStarts = new Map<string, { at: number; turnId: string | null }>();
+  // Per agent, the starts of turns still running: a nested autonomous turn can start inside a foreground one.
+  const turnStarts = new Map<string, { at: number; turnId: string | null }[]>();
   // Timeline length at the previous turn end per agent: the next turn starts after it.
   const turnEnds = new Map<string, number>();
   const retry = new Map<string, RetryState>();
@@ -324,12 +325,15 @@ export function createReportService(
 
   return {
     turnStarted(agent, turnId) {
-      turnStarts.set(agent.id, { at: Date.now(), turnId });
+      turnStarts.set(agent.id, [...(turnStarts.get(agent.id) ?? []).filter((start) => start.turnId !== turnId), { at: Date.now(), turnId }]);
       step(agent.id, { type: "turn_started" }, 0);
     },
     turnEnded(event, paseo) {
-      const start = turnStarts.get(event.agent.id) ?? null;
-      turnStarts.delete(event.agent.id);
+      const starts = turnStarts.get(event.agent.id) ?? [];
+      // The turn's own start, else the latest one (an end without a turn id, or a start the plugin missed).
+      const own = event.turnId === null ? -1 : starts.map((s) => s.turnId).lastIndexOf(event.turnId);
+      const start = starts.splice(own >= 0 ? own : starts.length - 1, 1)[0] ?? null;
+      if (starts.length === 0) turnStarts.delete(event.agent.id);
       const previousEnd = turnEnds.get(event.agent.id) ?? null;
       // Paseo 0.15 deliberately supplies [] rather than the full conversation here.
       // Never record that empty payload as an actual timeline position.
