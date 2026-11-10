@@ -33,6 +33,8 @@ export interface FetchedTimelineEntry {
   item: AgentTimelineItem;
   timestamp: string;
   turnId?: string;
+  /** Position in the timeline epoch; the same row on two pages has the same seq. */
+  seqStart?: number;
 }
 
 /**

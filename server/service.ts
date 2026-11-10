@@ -81,6 +81,7 @@ export const MAX_TIMELINE_PAGES = 10;
 /**
  * Rows from the timeline tail back to the turn's start, paging back while the oldest row is still inside the turn.
  * Without a known start one page is fetched. Past MAX_TIMELINE_PAGES the turn's earliest rows are left out (logged).
+ * Paging stops when the cursor stops moving back, and a row seen twice (same seq) is kept once.
  * Null when the fetch fails.
  */
 async function fetchTurnRows(paseo: PaseoApi, agentId: string, startedAtMs: number | null): Promise<FetchedTimelineEntry[] | null> {
@@ -88,13 +89,25 @@ async function fetchTurnRows(paseo: PaseoApi, agentId: string, startedAtMs: numb
   try {
     let page = await timeline.refetch({ direction: "tail", limit: TIMELINE_PAGE, projection: "projected" });
     let rows: FetchedTimelineEntry[] = page.entries;
+    let restarted = false;
     for (let pages = 1; startedAtMs !== null && page.hasOlder && page.startCursor && !(Date.parse(rows[0]?.timestamp ?? "") < startedAtMs); pages++) {
       if (pages >= MAX_TIMELINE_PAGES) {
         log(`turn of ${agentId.slice(0, 8)} is longer than ${MAX_TIMELINE_PAGES * TIMELINE_PAGE} timeline rows: its earliest rows are left out`);
         break;
       }
-      page = await timeline.refetch({ direction: "before", cursor: page.startCursor, limit: TIMELINE_PAGE, projection: "projected" });
-      rows = [...page.entries, ...rows];
+      const cursor = page.startCursor;
+      page = await timeline.refetch({ direction: "before", cursor, limit: TIMELINE_PAGE, projection: "projected" });
+      if (page.reset) {
+        // The epoch changed (rewind, history reload): the reply is the new tail and the rows paged so far may be gone.
+        // Start over from it once; a second reset means the history is still moving, so keep only this newest page.
+        rows = page.entries;
+        if (restarted) break;
+        restarted = true;
+        continue;
+      }
+      const seen = new Set(rows.map((entry) => entry.seqStart));
+      rows = [...page.entries.filter((entry) => entry.seqStart === undefined || !seen.has(entry.seqStart)), ...rows];
+      if (!(page.startCursor && page.startCursor.seq < cursor.seq)) break;
     }
     return rows;
   } catch (error) {

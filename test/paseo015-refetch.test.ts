@@ -7,7 +7,7 @@ import { sliceFetchedTurn, type FetchedTimelineEntry } from "../server/proof";
 import { DEFAULT_SETTINGS, type TurnReport } from "../shared/report";
 import type { AgentTimelineItem, PaseoApi } from "../server/host-types";
 
-interface Page { entries: FetchedTimelineEntry[]; hasOlder?: boolean; startCursor?: { epoch: string; seq: number } | null }
+interface Page { entries: FetchedTimelineEntry[]; hasOlder?: boolean; reset?: boolean; startCursor?: { epoch: string; seq: number } | null }
 type Refetch = (options: Record<string, unknown>) => Promise<Page>;
 
 /** Paseo 0.15: turn hooks send `timeline: []`, the plugin reads the rows through `timeline.refetch`. */
@@ -41,6 +41,8 @@ async function paseo015(refetch: Refetch) {
 }
 
 const row = (item: AgentTimelineItem, at = Date.now(), turnId?: string): FetchedTimelineEntry => ({ item, timestamp: new Date(at).toISOString(), ...(turnId ? { turnId } : {}) });
+const seq = (entry: FetchedTimelineEntry, n: number): FetchedTimelineEntry => ({ ...entry, seqStart: n });
+const shell = (command: string): AgentTimelineItem => ({ type: "tool_call", callId: command, name: "shell", status: "completed", error: null, detail: { type: "shell", command, exitCode: 0 } });
 const say = (text: string): AgentTimelineItem => ({ type: "assistant_message", text });
 const ask = (text: string): AgentTimelineItem => ({ type: "user_message", text });
 const names = (report: TurnReport | undefined) => report?.proof?.files.map((file) => file.split("/").pop()) ?? null;
@@ -94,11 +96,48 @@ describe("Paseo 0.15 turn hooks without a timeline", () => {
     const logs = vi.spyOn(console, "log");
     onTestFinished(() => logs.mockRestore());
     let rows: FetchedTimelineEntry[] = [];
-    const t = await paseo015(async () => ({ entries: rows, hasOlder: true, startCursor: { epoch: "e", seq: 1 } }));
+    let cursor = 10_000;
+    const t = await paseo015(async () => ({ entries: rows, hasOlder: true, startCursor: { epoch: "e", seq: (cursor -= TIMELINE_PAGE) } }));
     await t.runTurn("dsh-turn-1", () => (rows = [row(t.write("a.md"))]));
     expect(t.calls).toHaveLength(MAX_TIMELINE_PAGES);
     expect(logs.mock.calls.some(([line]) => String(line).includes("earliest rows are left out"))).toBe(true);
     expect(names(t.service.recent(null, 1)[0])).toEqual(["a.md"]);
+  });
+
+  it("a reset page (the epoch changed between two fetches) is not prepended as older rows", async () => {
+    let tail: FetchedTimelineEntry[] = [];
+    // A stale cursor gets the new epoch's tail back, with the same rows (agent-timeline-store.ts:102-108).
+    const t = await paseo015(async (options) => ({ entries: tail, hasOlder: true, reset: options.direction === "before", startCursor: { epoch: "e2", seq: 7 } }));
+    await t.runTurn("dsh-turn-1", () => (tail = [seq(row(shell("npm test")), 7), seq(row(say("tests pass")), 8)]));
+    expect(t.service.recent(null, 1)[0].proof?.commandsTotal).toBe(1);
+  });
+
+  it("a reset mid-paging starts over from the new tail and drops the old epoch's rows", async () => {
+    let oldTail: FetchedTimelineEntry[] = [];
+    let newTail: FetchedTimelineEntry[] = [];
+    let newOlder: FetchedTimelineEntry[] = [];
+    const t = await paseo015(async (options) => {
+      const cursor = options.cursor as { epoch: string; seq: number } | undefined;
+      if (options.direction === "tail") return { entries: oldTail, hasOlder: true, startCursor: { epoch: "e1", seq: 50 } };
+      if (cursor?.epoch === "e1") return { entries: newTail, hasOlder: true, reset: true, startCursor: { epoch: "e2", seq: 20 } };
+      return { entries: newOlder, hasOlder: false, startCursor: { epoch: "e2", seq: 1 } };
+    });
+    await t.runTurn("dsh-turn-1", () => {
+      oldTail = [seq(row(t.write("c.md")), 50)];
+      newOlder = [seq(row(say("earlier turn"), Date.now() - 5000), 1), seq(row(ask("long job")), 2), seq(row(t.write("a.md")), 3)];
+      newTail = [seq(row(t.write("b.md")), 20)];
+    });
+    expect(t.calls.map((call) => call.direction)).toEqual(["tail", "before", "before"]);
+    expect(t.calls[2]).toMatchObject({ cursor: { epoch: "e2", seq: 20 } });
+    expect(names(t.service.recent(null, 1)[0])?.sort()).toEqual(["a.md", "b.md"]);
+  });
+
+  it("stops paging when the cursor does not move back, and counts a repeated row once", async () => {
+    let tail: FetchedTimelineEntry[] = [];
+    const t = await paseo015(async () => ({ entries: tail, hasOlder: true, startCursor: { epoch: "e", seq: 7 } }));
+    await t.runTurn("dsh-turn-1", () => (tail = [seq(row(shell("npm test")), 7)]));
+    expect(t.calls).toHaveLength(2);
+    expect(t.service.recent(null, 1)[0].proof?.commandsTotal).toBe(1);
   });
 
   it("a failed fetch publishes the card without proof instead of skipping it as chat-only", async () => {
