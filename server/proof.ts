@@ -28,6 +28,38 @@ export function sliceTurn(timeline: readonly AgentTimelineItem[], previousEnd: n
   return lastUser >= 0 ? timeline.slice(lastUser) : timeline.slice();
 }
 
+/** A row of a fetched timeline page: unlike hook items, it carries the daemon's record time and, when the provider gave one, its turn id. */
+export interface FetchedTimelineEntry {
+  item: AgentTimelineItem;
+  timestamp: string;
+  turnId?: string;
+}
+
+/**
+ * Cuts a turn from fetched rows by time: rows recorded after the turn ended (the next prompt) are dropped, and the
+ * turn is every row recorded since it started. A turn without a user message (a finished background task) then
+ * takes in no earlier work. Rows tagged with another turn's id are dropped from the turn's window. With no known
+ * start (plugin restarted mid-turn) it falls back to the last user message, as `sliceTurn` does.
+ * `timeline` keeps the earlier rows so the turn is its suffix.
+ */
+export function sliceFetchedTurn(
+  entries: readonly FetchedTimelineEntry[],
+  window: { startedAtMs: number | null; endedAtMs: number },
+  turnId: string | null,
+): { timeline: AgentTimelineItem[]; turn: AgentTimelineItem[] } {
+  const { startedAtMs, endedAtMs } = window;
+  const kept = entries.filter((entry) => {
+    const at = Date.parse(entry.timestamp);
+    if (at > endedAtMs) return false;
+    const inTurn = startedAtMs !== null && !(at < startedAtMs);
+    return !(inTurn && turnId !== null && entry.turnId !== undefined && entry.turnId !== turnId);
+  });
+  const timeline = kept.map((entry) => entry.item);
+  if (startedAtMs === null) return { timeline, turn: sliceTurn(timeline, null) };
+  const from = kept.findIndex((entry) => !(Date.parse(entry.timestamp) < startedAtMs));
+  return { timeline, turn: from >= 0 ? timeline.slice(from) : [] };
+}
+
 export { commandKind, isTestFile };
 
 /**
