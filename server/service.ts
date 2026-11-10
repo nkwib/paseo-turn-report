@@ -5,7 +5,7 @@ import { CHECK_ALREADY_RUNNING, hasHiddenCharacters, MAX_REPORTS, REPORT_KIND, R
 import { createCheckApprovals, type CheckApprovals } from "./approvals";
 import type { AgentTimelineItem, PaseoApi } from "./host-types";
 import { changedFiles, collectArtifacts, type TurnWindow } from "./artifacts";
-import { buildProof, evidenceFromProof, extractEvidence, sliceTurn, toRepoPath, unreportedCwdAfter, type PluginCheck, type RunContext, type TurnEvidence } from "./proof";
+import { buildProof, evidenceFromProof, extractEvidence, sliceFetchedTurn, sliceTurn, toRepoPath, type FetchedTimelineEntry, unreportedCwdAfter, type PluginCheck, type RunContext, type TurnEvidence } from "./proof";
 import { detectCollisions, type PeerAgent } from "./collisions";
 import { enabledInConfig } from "./doc-viewer";
 import { repoInfo } from "./git";
@@ -18,7 +18,7 @@ export interface TurnEnded {
   agent: PluginHookAgent;
   turnId: string | null;
   outcome: { kind: "completed" } | { kind: "failed" } | { kind: "canceled" };
-  /** Whole conversation as the daemon has it (`agent.turn_ended`). */
+  /** Whole conversation as the daemon has it (`agent.turn_ended`); Paseo 0.15 sends [] and the turn is fetched. */
   timeline?: readonly AgentTimelineItem[];
 }
 
@@ -73,6 +73,34 @@ async function evidenceOf(origin: ReportOrigin, root: string | null, cwd: string
   if (!evidence || !root) return evidence;
   const fromGit = window ? await changedFiles(root, window) : [];
   return { ...evidence, files: [...new Set([...fromGit, ...evidence.files.map((path) => toRepoPath(path, { root, cwd, realCwd }))])] };
+}
+
+export const TIMELINE_PAGE = 200;
+export const MAX_TIMELINE_PAGES = 10;
+
+/**
+ * Rows from the timeline tail back to the turn's start, paging back while the oldest row is still inside the turn.
+ * Without a known start one page is fetched. Past MAX_TIMELINE_PAGES the turn's earliest rows are left out (logged).
+ * Null when the fetch fails.
+ */
+async function fetchTurnRows(paseo: PaseoApi, agentId: string, startedAtMs: number | null): Promise<FetchedTimelineEntry[] | null> {
+  const timeline = paseo.agents.ref(agentId).timeline;
+  try {
+    let page = await timeline.refetch({ direction: "tail", limit: TIMELINE_PAGE, projection: "projected" });
+    let rows: FetchedTimelineEntry[] = page.entries;
+    for (let pages = 1; startedAtMs !== null && page.hasOlder && page.startCursor && !(Date.parse(rows[0]?.timestamp ?? "") < startedAtMs); pages++) {
+      if (pages >= MAX_TIMELINE_PAGES) {
+        log(`turn of ${agentId.slice(0, 8)} is longer than ${MAX_TIMELINE_PAGES * TIMELINE_PAGE} timeline rows: its earliest rows are left out`);
+        break;
+      }
+      page = await timeline.refetch({ direction: "before", cursor: page.startCursor, limit: TIMELINE_PAGE, projection: "projected" });
+      rows = [...page.entries, ...rows];
+    }
+    return rows;
+  } catch (error) {
+    log(`timeline fetch failed for ${agentId.slice(0, 8)}: ${String(error).slice(0, 200)}`);
+    return null;
+  }
 }
 
 export interface ReportService {
@@ -290,7 +318,9 @@ export function createReportService(
       const start = turnStarts.get(event.agent.id) ?? null;
       turnStarts.delete(event.agent.id);
       const previousEnd = turnEnds.get(event.agent.id) ?? null;
-      if (event.timeline) turnEnds.set(event.agent.id, event.timeline.length);
+      // Paseo 0.15 deliberately supplies [] rather than the full conversation here.
+      // Never record that empty payload as an actual timeline position.
+      if (event.timeline?.length) turnEnds.set(event.agent.id, event.timeline.length);
       if (event.outcome.kind === "canceled") {
         step(event.agent.id, { type: "turn_canceled" }, 0);
         log(`skip ${event.agent.id.slice(0, 8)}: turn canceled`);
@@ -305,9 +335,22 @@ export function createReportService(
       // Turn ids are numbered per agent session ("foreground-turn-1", "codex-turn-0"), so they repeat across agents
       // and after a daemon restart; the agent id and start time keep each turn's report and chat row apart.
       const reportId = `turn-report:${event.agent.id}:${event.turnId ?? start?.turnId ?? "turn"}:${startedAtMs ?? Date.now()}`;
-      const turn = event.timeline ? sliceTurn(event.timeline, previousEnd) : null;
       const kind = retry.get(event.agent.id)?.kind === "in_followup" ? "plugin_followup" : "turn";
-      track(buildReport({ kind, event, reportId, startedAtMs, turn }, paseo).catch((error) => log(`report failed: ${String(error)}`)));
+      // Paseo 0.15 sends [] instead of the history (turn hooks carry no timeline there): fetch the turn's rows.
+      const endedAtMs = Date.now();
+      const work = (async () => {
+        let timeline = event.timeline;
+        let turn = timeline ? sliceTurn(timeline, previousEnd) : null;
+        if (timeline?.length === 0) {
+          const fetched = await fetchTurnRows(paseo, event.agent.id, startedAtMs);
+          const cut = fetched && sliceFetchedTurn(fetched, { startedAtMs, endedAtMs }, event.turnId ?? start?.turnId ?? null);
+          // A failed fetch leaves the card without proof (evidence unavailable) rather than calling the turn chat-only.
+          timeline = cut?.timeline;
+          turn = cut?.turn ?? null;
+        }
+        await buildReport({ kind, event: { ...event, timeline }, reportId, startedAtMs, turn }, paseo);
+      })();
+      track(work.catch((error) => log(`report failed: ${String(error)}`)));
     },
     recent(workspaceId, limit) {
       const out: TurnReport[] = [];
