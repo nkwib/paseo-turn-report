@@ -81,6 +81,7 @@ export const MAX_TIMELINE_PAGES = 10;
 /**
  * Rows from the timeline tail back to the turn's start, paging back while the oldest row is still inside the turn.
  * Without a known start one page is fetched. Past MAX_TIMELINE_PAGES the turn's earliest rows are left out (logged).
+ * Paging stops when the cursor stops moving back, and a row seen twice (same seq) is kept once.
  * Null when the fetch fails.
  */
 async function fetchTurnRows(paseo: PaseoApi, agentId: string, startedAtMs: number | null): Promise<FetchedTimelineEntry[] | null> {
@@ -88,13 +89,25 @@ async function fetchTurnRows(paseo: PaseoApi, agentId: string, startedAtMs: numb
   try {
     let page = await timeline.refetch({ direction: "tail", limit: TIMELINE_PAGE, projection: "projected" });
     let rows: FetchedTimelineEntry[] = page.entries;
+    let restarted = false;
     for (let pages = 1; startedAtMs !== null && page.hasOlder && page.startCursor && !(Date.parse(rows[0]?.timestamp ?? "") < startedAtMs); pages++) {
       if (pages >= MAX_TIMELINE_PAGES) {
         log(`turn of ${agentId.slice(0, 8)} is longer than ${MAX_TIMELINE_PAGES * TIMELINE_PAGE} timeline rows: its earliest rows are left out`);
         break;
       }
-      page = await timeline.refetch({ direction: "before", cursor: page.startCursor, limit: TIMELINE_PAGE, projection: "projected" });
-      rows = [...page.entries, ...rows];
+      const cursor = page.startCursor;
+      page = await timeline.refetch({ direction: "before", cursor, limit: TIMELINE_PAGE, projection: "projected" });
+      if (page.reset) {
+        // The epoch changed (rewind, history reload): the reply is the new tail and the rows paged so far may be gone.
+        // Start over from it once; a second reset means the history is still moving, so keep only this newest page.
+        rows = page.entries;
+        if (restarted) break;
+        restarted = true;
+        continue;
+      }
+      const seen = new Set(rows.map((entry) => entry.seqStart));
+      rows = [...page.entries.filter((entry) => entry.seqStart === undefined || !seen.has(entry.seqStart)), ...rows];
+      if (!(page.startCursor && page.startCursor.seq < cursor.seq)) break;
     }
     return rows;
   } catch (error) {
@@ -127,7 +140,8 @@ export function createReportService(
   persistence: ReportPersistence = { initial: [], save: () => {} },
   approvals: CheckApprovals = createCheckApprovals(null),
 ): ReportService {
-  const turnStarts = new Map<string, { at: number; turnId: string | null }>();
+  // Per agent, the starts of turns still running: a nested autonomous turn can start inside a foreground one.
+  const turnStarts = new Map<string, { at: number; turnId: string | null }[]>();
   // Timeline length at the previous turn end per agent: the next turn starts after it.
   const turnEnds = new Map<string, number>();
   const retry = new Map<string, RetryState>();
@@ -311,12 +325,15 @@ export function createReportService(
 
   return {
     turnStarted(agent, turnId) {
-      turnStarts.set(agent.id, { at: Date.now(), turnId });
+      turnStarts.set(agent.id, [...(turnStarts.get(agent.id) ?? []).filter((start) => start.turnId !== turnId), { at: Date.now(), turnId }]);
       step(agent.id, { type: "turn_started" }, 0);
     },
     turnEnded(event, paseo) {
-      const start = turnStarts.get(event.agent.id) ?? null;
-      turnStarts.delete(event.agent.id);
+      const starts = turnStarts.get(event.agent.id) ?? [];
+      // The turn's own start, else the latest one (an end without a turn id, or a start the plugin missed).
+      const own = event.turnId === null ? -1 : starts.map((s) => s.turnId).lastIndexOf(event.turnId);
+      const start = starts.splice(own >= 0 ? own : starts.length - 1, 1)[0] ?? null;
+      if (starts.length === 0) turnStarts.delete(event.agent.id);
       const previousEnd = turnEnds.get(event.agent.id) ?? null;
       // Paseo 0.15 deliberately supplies [] rather than the full conversation here.
       // Never record that empty payload as an actual timeline position.
