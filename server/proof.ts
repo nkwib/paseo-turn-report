@@ -40,7 +40,8 @@ export interface FetchedTimelineEntry {
 /**
  * Cuts a turn from fetched rows by time: rows recorded after the turn ended (the next prompt) are dropped, and the
  * turn is every row recorded since it started. A turn without a user message (a finished background task) then
- * takes in no earlier work. Rows tagged with another turn's id are dropped from the turn's window. With no known
+ * takes in no earlier work. Rows tagged with another turn's id are dropped from the turn's window, and the rows right
+ * before it that carry this turn's id are taken in. With no known
  * start (plugin restarted mid-turn) it falls back to the last user message, as `sliceTurn` does.
  * `timeline` keeps the earlier rows so the turn is its suffix.
  */
@@ -58,8 +59,12 @@ export function sliceFetchedTurn(
   });
   const timeline = kept.map((entry) => entry.item);
   if (startedAtMs === null) return { timeline, turn: sliceTurn(timeline, null) };
-  const from = kept.findIndex((entry) => !(Date.parse(entry.timestamp) < startedAtMs));
-  return { timeline, turn: from >= 0 ? timeline.slice(from) : [] };
+  let from = kept.findIndex((entry) => !(Date.parse(entry.timestamp) < startedAtMs));
+  if (from < 0) from = kept.length;
+  // Paseo records the prompt after the turn_started hook (agent-manager.ts:2847-2870), and a plugin slow to start
+  // sees every row before its start time: rows just before the window that carry this turn's id are the turn's.
+  while (turnId !== null && from > 0 && kept[from - 1].turnId === turnId) from--;
+  return { timeline, turn: timeline.slice(from) };
 }
 
 export { commandKind, isTestFile };

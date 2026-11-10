@@ -77,6 +77,14 @@ describe("Paseo 0.15 turn hooks without a timeline", () => {
     expect(names(t.service.recent(null, 1)[0])).toEqual(["a.md"]);
   });
 
+  it("a turn whose rows all precede the plugin's start time is still judged by its turn id", async () => {
+    const rows: FetchedTimelineEntry[] = [];
+    const t = await paseo015(async () => ({ entries: rows }));
+    const before = Date.now() - 1000;
+    await t.runTurn("dsh-turn-1", () => rows.push(row(ask("write a"), before, "dsh-turn-1"), row(t.write("a.md"), before + 1, "dsh-turn-1")));
+    expect(names(t.service.recent(null, 1)[0])).toEqual(["a.md"]);
+  });
+
   it("pages back until it reaches the start of a turn longer than one page", async () => {
     let older: FetchedTimelineEntry[] = [];
     let tail: FetchedTimelineEntry[] = [];
@@ -166,6 +174,16 @@ describe("sliceFetchedTurn", () => {
     const { timeline, turn } = sliceFetchedTurn(entries, { startedAtMs: at, endedAtMs: at + 10 }, "t2");
     expect(turn).toEqual([say("b"), say("d")]);
     expect(timeline).toEqual([ask("one"), say("a"), say("b"), say("d")]);
+  });
+
+  it("takes in this turn's rows recorded just before its start (the prompt follows the turn_started hook)", () => {
+    const early = [row(ask("one"), at - 10, "t1"), row(say("a"), at - 5, "t1"), row(ask("two"), at - 1, "t2"), row(say("b"), at + 1, "t2")];
+    expect(sliceFetchedTurn(early, { startedAtMs: at, endedAtMs: at + 10 }, "t2").turn).toEqual([ask("two"), say("b")]);
+  });
+
+  it("takes in this turn's rows when all of them precede the start, but not an older run of the same id", () => {
+    const late = [row(ask("old"), at - 90, "t2"), row(say("x"), at - 80, "t1"), row(ask("two"), at - 20, "t2"), row(say("b"), at - 10, "t2")];
+    expect(sliceFetchedTurn(late, { startedAtMs: at, endedAtMs: at + 10 }, "t2").turn).toEqual([ask("two"), say("b")]);
   });
 
   it("without a known start, falls back to the last user message before the end", () => {
