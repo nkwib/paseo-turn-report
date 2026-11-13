@@ -46,7 +46,7 @@ npm test
 
 Tests create temporary Git repositories, so they need `git` 2.38 or later on `PATH`.
 
-CI compiles a clean `git archive` of `HEAD`, with no `node_modules`, against the released Paseo 0.11.2, 0.11.4 and 0.12.0 compilers. It also reads the manifest and evaluates the server contribution with each host's own runtime. Missing host validation fails those jobs.
+CI compiles a clean `git archive` of `HEAD`, with no `node_modules`, against the released Paseo 0.11.2, 0.11.4, 0.12.0, 0.14.0 and 0.15.4 compilers. It also reads the manifest and evaluates the server contribution with each host's own runtime. Missing host validation fails those jobs.
 
 Run the same check locally with an installed Paseo CLI prefix:
 
@@ -54,7 +54,7 @@ Run the same check locally with an installed Paseo CLI prefix:
 PASEO_RUNTIME=/path/to/paseo-prefix PASEO_REQUIRE_INSTALL=1 npm test -- test/install.test.ts
 ```
 
-For development builds, set `PASEO_SOURCE` to a dependency-ready getpaseo/paseo checkout. The test always compiles that checkout; `PASEO_REFS=v0.11.2,v0.11.4,v0.12.0` additionally selects compiler refs that must exist in it. Without either host variable, the ordinary test run skips host validation and states why. Invalid explicit host paths and missing requested refs fail rather than skip. Commit changes before this check: it validates `HEAD`, not uncommitted files.
+For development builds, set `PASEO_SOURCE` to a dependency-ready getpaseo/paseo checkout. The test always compiles that checkout; `PASEO_REFS=v0.11.2,v0.11.4,v0.12.0,v0.14.0,v0.15.4` additionally selects compiler refs that must exist in it. Without either host variable, the ordinary test run skips host validation and states why. Invalid explicit host paths and missing requested refs fail rather than skip. Commit changes before this check: it validates `HEAD`, not uncommitted files.
 
 ## License
 

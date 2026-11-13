@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0 (2026-11-13)
+
+### Fixed
+
+- Reports keep their tool evidence on Paseo 0.15. The turn hook can hand the plugin an empty timeline instead of the turn's history, which judged the turn chat-only and dropped the proof behind every claim. The plugin refetches the turn history before it judges a report, cuts the refetched tail by time, and pages back to the turn's start. A failed fetch now leaves the card without proof instead of calling the turn chat-only.
+- Paging stops on a reset or a stuck cursor. A stale cursor returned the new epoch's tail, which was prepended as older rows until the page cap: one run counted the same rows ten times. A reset starts over once from the new tail, a second reset keeps only the newest page, and rows are deduplicated by sequence number.
+- A turn takes in its own rows recorded just before its start. Paseo records the prompt after the turn_started hook, so a slow plugin start saw every row as older than the turn and judged it chat-only. The contiguous run of rows carrying the turn's id right before the window now counts.
+- Each running turn keeps its own start, per turn id. A nested autonomous turn overwrote the foreground agent's start, so that turn lost its window and fell back to the last user message.
+
+### Changed
+
+- CI validates clean Git archives against Paseo 0.14.0 and 0.15.4 as well as 0.11.2, 0.11.4 and 0.12.0.
+
 ## 0.2.0 (2026-10-21)
 
 ### Changed
